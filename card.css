@@ -1,0 +1,102 @@
+body {
+    margin: 0;
+    padding: 0;
+    font-family: Arial, sans-serif;
+    font-size: 14px;
+}
+
+.business-card {
+    width: 2in;
+    height: 3.5in;
+    border: 1px solid #000;
+    padding: 0px;
+    box-sizing: border-box;
+}
+
+.business-card img {
+    width: 100%;
+    height: auto;
+    object-fit: contain;
+}
+
+.business-card-front {
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    padding-bottom: 5px;
+}
+
+.business-card-front .logo {
+    display: block;
+    margin: 0 auto;
+    position: relative;
+    top: 0;
+}
+
+.business-card-front span {
+    display: block;
+    text-align: center;
+    padding: 10px 0;
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.business-card-front .portrait {
+    width: 100%;
+    height: auto;
+    object-fit: contain;
+}
+
+.business-card-front div {
+    flex-grow: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.business-card-back {
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    padding: 10px;
+}
+
+.business-card-back .qr-code,
+.business-card-back .description,
+.business-card-back .attributes {
+    margin: 5px 0;
+}
+
+.business-card-back .qr-code {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    padding: 0;
+    margin: 0;
+}
+
+.business-card-back .qr-code img {
+    width: 75%;
+    height: auto;
+}
+
+.business-card-back .attributes table td:nth-child(2) {
+    text-align: right;
+}
+
+.business-card-back .attributes table {
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.no-space{
+    margin: 0px!important;
+    padding: 0px!important;
+}
+
+.centered {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    text-align: center;
+}
