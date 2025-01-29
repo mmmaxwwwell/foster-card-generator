@@ -1,17 +1,48 @@
 {
-  description = "A very basic flake";
+  description = "";
 
   inputs = {
-    nixpkgs.url = "github:nixos/nixpkgs?ref=nixos-unstable";
+    flake-utils = {
+      url = "github:numtide/flake-utils";
+    };
+    flake-compat = {
+      url = "github:edolstra/flake-compat";
+      flake = false;
+    };
+    android-nixpkgs = {
+      url = "github:tadfisher/android-nixpkgs";
+    };
   };
 
-  outputs = { self, nixpkgs }: {
-
-    packages.x86_64-linux.hello = nixpkgs.legacyPackages.x86_64-linux.hello;
-
-    packages.x86_64-linux.default = self.packages.x86_64-linux.hello;
-
-    packages.x86_64-linux.qrencode = nixpkgs.legacyPackages.x86_64-linux.qrencode;
-
-  };
+  outputs = { self, nixpkgs, flake-utils, flake-compat, android-nixpkgs }:
+    flake-utils.lib.eachDefaultSystem ( system:
+      let
+        pkgs = import nixpkgs {
+          inherit system;
+          config = {
+            programs.nix-ld.enable = true;
+            programs.nix-ld.libraries = with pkgs; [
+              # Add any missing dynamic libraries for unpackaged programs
+              # here, NOT in environment.systemPackages
+              google-chrome
+            ];
+          };
+        };
+      in {
+        devShells = {
+          default = pkgs.mkShell {
+            name = "stuff";
+            buildInputs = with pkgs; [
+              wkhtmltopdf
+              qrencode
+              nodejs_22
+              chromium  # Added Chromium to buildInputs
+            ];
+            shellHook = ''
+              export PUPPETEER_EXECUTABLE_PATH=${pkgs.chromium}/bin/chromium
+            '';
+          };
+        };
+      }
+    );
 }

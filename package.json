@@ -1,0 +1,14 @@
+{
+  "name": "foster-card-generator",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "generate-cards": "./generate-cards.sh"
+  },
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "dependencies": {
+    "puppeteer": "^24.1.1"
+  }
+}
