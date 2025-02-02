@@ -18,15 +18,16 @@ async function capture(page, divName) {
 (async () => {
     const browser = await puppeteer.launch();
     const page = await browser.newPage();
+    await page.setViewport({
+        width:1920,
+        height:1080,
+        deviceScaleFactor: 2
+    })
+
     await page.goto(`file://${path.join(process.cwd(), 'card.html')}`, { waitUntil: 'networkidle0' });
 
     await capture(page, "card-front");
     await capture(page, "card-back");
-
-    await page.goto(`file://${path.join(process.cwd(), 'card-front-page.html')}`, { waitUntil: 'networkidle0' });
-    await capture(page, "card-front-page");
-    await page.goto(`file://${path.join(process.cwd(), 'card-back-page.html')}`, { waitUntil: 'networkidle0' });
-    await capture(page, "card-back-page");
 
     await browser.close();
 })();
