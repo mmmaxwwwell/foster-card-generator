@@ -6,12 +6,12 @@ export class DogProfile {
     adoptionUrl: string;
     gender: string;
     size: string;
-    shots: boolean;
-    housetrained: boolean;
-    okWithKids: boolean;
-    okWithDogs: boolean;
-    okWithCats: boolean;
-    specialNeeds: boolean;
+    shots: number;
+    housetrained: number;
+    okWithKids: number;
+    okWithDogs: number;
+    okWithCats: number;
+    specialNeeds: number;
 
     constructor(
         id: string,
@@ -21,12 +21,12 @@ export class DogProfile {
         adoptionUrl: string,
         gender: string,
         size: string,
-        shots: boolean,
-        housetrained: boolean,
-        okWithKids: boolean,
-        okWithDogs: boolean,
-        okWithCats: boolean,
-        specialNeeds: boolean
+        shots: number,
+        housetrained: number,
+        okWithKids: number,
+        okWithDogs: number,
+        okWithCats: number,
+        specialNeeds: number
     ) {
         this.id = id;
         this.name = name;
