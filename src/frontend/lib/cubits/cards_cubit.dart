@@ -27,14 +27,19 @@ class CardsCubit extends Cubit<List<String>> {
     try {
       final response = await http.get(Uri.parse('http://localhost:3000/cards'));
       if (response.statusCode == 200) {
-        final List<dynamic> data = json.decode(response.body);
-        final cards = data.map((item) => item.toString()).toList();
-        emit(cards);
+        final decoded = json.decode(response.body);
+        if (decoded['success'] == true) {
+          final List<dynamic> data = decoded['data'];
+          final cards = data.map((item) => item.toString()).toList();
+          emit(cards);
+        } else {
+          throw "Failed to fetch cards";
+        }
       } else {
-        // Handle error response...
+        throw "Failed to fetch cards";
       }
     } catch (e) {
-      // Handle network error...
+      throw "Failed to fetch cards";
     }
   }
 }
