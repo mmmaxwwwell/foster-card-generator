@@ -6,9 +6,9 @@ export const usersTable = sqliteTable("users_table", {
   email: text().notNull().unique(),
 });
 
-// Updated test table to match DogProfile fields:
+// Updated cardsTable with auto-increment id and updated DogProfile fields:
 export const cardsTable = sqliteTable("cards_table", {
-  id: text().primaryKey(),
+  id: int().primaryKey({ autoIncrement: true }),
   name: text().notNull(),
   age: int().notNull(),
   breed: text().notNull(),

@@ -12,21 +12,22 @@ const fastify = Fastify({ logger: true });
 
 // Seed the database idempotently with two fake dogs
 async function seedDatabase() {
-  // Check and insert first dog if not exists
-  const existingDog1 = await db.select().from(cardsTable).where(eq(cardsTable.id, "dog1"));
+  // Check and insert first dog if not exists using adoptionUrl as unique field
+  const existingDog1 = await db.select().from(cardsTable).where(eq(cardsTable.adoptionUrl, "http://example.com/buddy"));
   if (!existingDog1.length) {
+    // Pass undefined for id so auto-increment works
     const dog1 = new DogProfile(
-      "dog1", "Buddy", 3, "Golden Retriever",
+      undefined, "Buddy", 3, "Golden Retriever",
       "http://example.com/buddy", "Male", "Large",
       1, 1, 1, 1, 1, 0
     );
     await db.insert(cardsTable).values(dog1);
   }
-  // Check and insert second dog if not exists
-  const existingDog2 = await db.select().from(cardsTable).where(eq(cardsTable.id, "dog2"));
+  // Check and insert second dog if not exists using adoptionUrl as unique field
+  const existingDog2 = await db.select().from(cardsTable).where(eq(cardsTable.adoptionUrl, "http://example.com/bella"));
   if (!existingDog2.length) {
     const dog2 = new DogProfile(
-      "dog2", "Bella", 4, "Labrador",
+      undefined, "Bella", 4, "Labrador",
       "http://example.com/bella", "Female", "Medium",
       1, 1, 1, 1, 1, 0
     );
@@ -41,12 +42,10 @@ fastify.get('/', async (request, reply) => {
 // Create new card
 fastify.post('/cards', async (request, reply) => {
   try {
-    // Accepting a complete DogProfile from the request body
     const profile = request.body as DogProfile;
-    // Optionally create an instance if additional initialization is needed:
-    // const dogProfile = new DogProfile(profile.id, profile.name, profile.age, profile.breed, profile.adoptionUrl, profile.gender, profile.size, profile.shots, profile.housetrained, profile.okWithKids, profile.okWithDogs, profile.okWithCats, profile.specialNeeds);
-
-    await db.insert(cardsTable).values(profile);
+    // Remove id if provided so DB can auto-increment
+    const { id, ...data } = profile;
+    await db.insert(cardsTable).values(data);
     return { success: true, message: 'Card created successfully' };
   } catch (error) {
     reply.code(500);
@@ -69,7 +68,7 @@ fastify.get('/cards', async (request, reply) => {
 fastify.get('/cards/:id', async (request, reply) => {
   try {
     const { id } = request.params as { id: string };
-    const card = await db.select().from(cardsTable).where(eq(cardsTable.id, id));
+    const card = await db.select().from(cardsTable).where(eq(cardsTable.id, Number(id)));
     if (!card.length) {
       reply.code(404);
       return { success: false, error: 'Card not found' };
@@ -87,7 +86,6 @@ fastify.put('/cards/:id', async (request, reply) => {
     const { id } = request.params as { id: string };
     const updates = request.body as Partial<DogProfile> & { [key: string]: boolean | number | string };
 
-    // Updated toNumber to handle string values as well
     const toNumber = (v: boolean | number | string): number => {
       if (typeof v === 'boolean') return v ? 1 : 0;
       if (typeof v === 'number') return v;
@@ -123,7 +121,7 @@ fastify.put('/cards/:id', async (request, reply) => {
 
     await db.update(cardsTable)
       .set(updatedFields)
-      .where(eq(cardsTable.id, id));
+      .where(eq(cardsTable.id, Number(id)));
     return { success: true, message: 'Card updated successfully' };
   } catch (error) {
     reply.code(500);
@@ -136,7 +134,7 @@ fastify.delete('/cards/:id', async (request, reply) => {
   try {
     const { id } = request.params as { id: string };
     await db.delete(cardsTable)
-      .where(eq(cardsTable.id, id));
+      .where(eq(cardsTable.id, Number(id)));
     return { success: true, message: 'Card deleted successfully' };
   } catch (error) {
     reply.code(500);

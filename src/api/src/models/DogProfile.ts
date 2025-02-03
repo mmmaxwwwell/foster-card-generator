@@ -1,5 +1,5 @@
 export class DogProfile {
-    id: string;
+    id?: number;
     name: string;
     age: number;
     breed: string;
@@ -14,7 +14,7 @@ export class DogProfile {
     specialNeeds: number;
 
     constructor(
-        id: string,
+        id: number| undefined,
         name: string,
         age: number,
         breed: string,
@@ -28,7 +28,7 @@ export class DogProfile {
         okWithCats: number,
         specialNeeds: number
     ) {
-        this.id = id;
+        this.id = id ;
         this.name = name;
         this.age = age;
         this.breed = breed;
