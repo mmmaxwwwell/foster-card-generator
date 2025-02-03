@@ -9,12 +9,9 @@
       url = "github:edolstra/flake-compat";
       flake = false;
     };
-    android-nixpkgs = {
-      url = "github:tadfisher/android-nixpkgs";
-    };
   };
 
-  outputs = { self, nixpkgs, flake-utils, flake-compat, android-nixpkgs }:
+  outputs = { self, nixpkgs, flake-utils, flake-compat}:
     flake-utils.lib.eachDefaultSystem ( system:
       let
         pkgs = import nixpkgs {
