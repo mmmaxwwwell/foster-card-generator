@@ -24,7 +24,7 @@ async function capture(page, divName) {
         deviceScaleFactor: 2
     })
 
-    await page.goto(`file://${path.join(process.cwd(), 'card.html')}`, { waitUntil: 'networkidle0' });
+    await page.goto(`file://${path.join(process.cwd(), 'src/card.html')}`, { waitUntil: 'networkidle0' });
 
     await capture(page, "card-front");
     await capture(page, "card-back");

@@ -3,12 +3,18 @@ import { drizzle } from 'drizzle-orm/libsql';
 import { eq } from 'drizzle-orm';
 import { usersTable, cardsTable } from './db/schema';
 import { DogProfile } from './models/DogProfile';
-  
+import path from 'path';
+import fastifyStatic from '@fastify/static';
+
 const db = drizzle(process.env.DB_FILE_NAME!);
 
 import Fastify from 'fastify';
 
 const fastify = Fastify({ logger: true });
+
+fastify.register(fastifyStatic, {
+  root: path.join(__dirname, '..', 'assets'),
+});
 
 // Seed the database idempotently with two fake dogs
 async function seedDatabase() {
@@ -35,8 +41,12 @@ async function seedDatabase() {
   }
 }
 
-fastify.get('/', async (request, reply) => {
+fastify.get('/hello', async (request, reply) => {
   return { hello: 'world' };
+});
+
+fastify.get('/', (request, reply) => {
+  return reply.sendFile('index.html');
 });
 
 // Create new card
