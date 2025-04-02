@@ -1,5 +1,4 @@
 const puppeteer = require('puppeteer');
-
 const tmp = require('tmp');
 const fs = require('fs').promises;
 const rimraf = require('rimraf');
@@ -61,7 +60,7 @@ async function capture(page, divName) {
     const browser = await puppeteer.launch();
     const page = await browser.newPage();
 
-    let {tmpPath} = await createTempDir();
+    let {tmpPath, cleanup} = await createTempDir();
 
     let params = {
         name: "Doug",
@@ -89,11 +88,13 @@ async function capture(page, divName) {
     })
 
     await page.goto(`file://${path.join(tmpPath, 'card-front.html')}`, { waitUntil: 'networkidle0' });
-    await capture(page, "card-front");
+    await capture(page, `${params.name}-card-front`);
 
     await page.goto(`file://${path.join(tmpPath, 'card-back.html')}`, { waitUntil: 'networkidle0' });
-    await capture(page, "card-back");
+    await capture(page, `${params.name}-card-back`);
 
     await browser.close();
+
+    await cleanup();
 })();
 
