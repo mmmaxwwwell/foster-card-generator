@@ -5,6 +5,7 @@ const rimraf = require('rimraf');
 const path = require('path');
 const yaml = require('js-yaml');
 const fsSync = require('fs');
+const QRCode = require('qrcode')
 
 async function createTempDir(params) {
     return new Promise((resolve, reject) => {
@@ -33,14 +34,38 @@ async function createTempDir(params) {
 
 async function replaceParametersInHtml(fileName, outputPath, params) {
     let content = await fs.readFile(path.join(process.cwd(), 'src', fileName), 'utf8');
+    
+    // Generate QR code if needed
+    if (fileName === 'card-back.html') {
+        try {
+            // Generate QR code as data URL
+            const qrCodeUrl = await QRCode.toDataURL(params.slug || params.adoptionUrl);
+            params.qrcode = qrCodeUrl;
+        } catch (err) {
+            console.error('Error generating QR code:', err);
+            // Fallback to Google Charts API if local generation fails
+            params.qrcode = `https://chart.googleapis.com/chart?chs=128x128&cht=qr&chl=${encodeURIComponent(params.slug || params.adoptionUrl)}`;
+        }
+    }
+    
+    // Replace all parameters in the HTML content
     for (const key in params) {
         const regex = new RegExp(`~${key}~`, 'g');
-        if (typeof params[key] === 'boolean') {
-            params[key] = params[key] ? "✅" : "❌";
+        
+        let value = params[key];
+        // Convert boolean values to checkmarks/X marks
+        if (typeof value === 'boolean') {
+            value = value ? "✅" : "❌";
+        } else if (value === 1) {
+            value = "✅";
+        } else if (value === 0) {
+            value = "❌";
         }
-        content = content.replace(regex, params[key]);
+        
+        content = content.replace(regex, value);
     }
-    await fs.writeFile(path.join(outputPath, fileName) , content, 'utf8');
+    
+    await fs.writeFile(path.join(outputPath, fileName), content, 'utf8');
 }
 
 async function capture(page, divName) {
@@ -67,7 +92,7 @@ async function generateCard(params) {
 
     await replaceParametersInHtml("card-front.html", tmpPath, params)
     await replaceParametersInHtml("card-back.html", tmpPath, params)
-    
+
     await page.setViewport({
         width: 1920,
         height: 1080,

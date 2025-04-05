@@ -6,17 +6,13 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Card Generator</title>
     <link rel="stylesheet" href="./card.css">
-    <script src="./qrcode/min.js"></script>
 </head>
 
 <body>
     <div id="page" class="no-space">
         <div id="card-back1" class="business-card business-card-back">
             <span class="no-space centered">~slug~</span>
-            <div id="qrcode1"></div>
-            <script type="text/javascript">
-                new QRCode(document.getElementById("qrcode1"), "~slug~");
-            </script>
+              <img src="~qrcode~" />
             <div class="attributes">
                 <table>
                     <tr>
@@ -56,7 +52,7 @@
         </div>
         <div id="card-back2" class="business-card business-card-back">
             <span class="no-space centered">~slug~</span>
-            <img src="https://chart.googleapis.com/chart?chs=128x128&cht=qr&chl=~slug~" alt="QR Code">
+            <img src="~qrcode~" alt="QR Code">
             <div class="attributes">
                 <table>
                     <tr>
