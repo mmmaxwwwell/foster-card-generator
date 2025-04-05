@@ -5,8 +5,8 @@ const rimraf = require('rimraf');
 const path = require('path');
 const yaml = require('js-yaml');
 const fsSync = require('fs');
-const QRCode = require('qrcode')
-
+const QRCode = require('qrcode');
+const Handlebars = require('handlebars');
 async function createTempDir(params) {
     return new Promise((resolve, reject) => {
         tmp.dir({ prefix: 'foster-card-', tmpdir: '/tmp' }, (err, tmpPath, cleanupCallback) => {
@@ -33,39 +33,47 @@ async function createTempDir(params) {
 }
 
 async function replaceParametersInHtml(fileName, outputPath, params) {
-    let content = await fs.readFile(path.join(process.cwd(), 'src', fileName), 'utf8');
-    
+    // Read template
+    const source = await fs.readFile(path.join(process.cwd(), 'src', fileName), 'utf8');
+
     // Generate QR code if needed
     if (fileName === 'card-back.html') {
         try {
-            // Generate QR code as data URL
-            const qrCodeUrl = await QRCode.toDataURL(params.slug || params.adoptionUrl);
-            params.qrcode = qrCodeUrl;
+            params.qrcode = await QRCode.toDataURL(params.slug || params.adoptionUrl);
         } catch (err) {
             console.error('Error generating QR code:', err);
-            // Fallback to Google Charts API if local generation fails
             params.qrcode = `https://chart.googleapis.com/chart?chs=128x128&cht=qr&chl=${encodeURIComponent(params.slug || params.adoptionUrl)}`;
         }
-    }
-    
-    // Replace all parameters in the HTML content
-    for (const key in params) {
-        const regex = new RegExp(`~${key}~`, 'g');
         
-        let value = params[key];
-        // Convert boolean values to checkmarks/X marks
-        if (typeof value === 'boolean') {
-            value = value ? "✅" : "❌";
-        } else if (value === 1) {
-            value = "✅";
-        } else if (value === 0) {
-            value = "❌";
+        // Add cards array for the loop (10 cards)
+        params.cards = Array(10).fill({});
+    }
+
+    // Process boolean values
+    const processedParams = { ...params };
+    for (const key in processedParams) {
+        if (typeof processedParams[key] === 'boolean') {
+            processedParams[key] = processedParams[key] ? "✅" : "❌";
+        } else if (processedParams[key] === 1) {
+            processedParams[key] = "✅";
+        } else if (processedParams[key] === 0) {
+            processedParams[key] = "❌";
         }
-        
-        content = content.replace(regex, value);
     }
-    
-    await fs.writeFile(path.join(outputPath, fileName), content, 'utf8');
+
+    // Register a helper to maintain compatibility with the ~variable~ syntax
+    Handlebars.registerHelper('tilde', function(context) {
+        return new Handlebars.SafeString('~' + context + '~');
+    });
+
+    // Convert ~variable~ syntax to Handlebars syntax {{variable}}
+    const handlebarsTemplate = source.replace(/~(\w+)~/g, '{{$1}}');
+
+    // Compile and render template
+    const template = Handlebars.compile(handlebarsTemplate);
+    const result = template(processedParams);
+
+    await fs.writeFile(path.join(outputPath, fileName), result, 'utf8');
 }
 
 async function capture(page, divName) {

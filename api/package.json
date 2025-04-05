@@ -26,6 +26,7 @@
     "drizzle-orm": "^0.39.1",
     "express": "^4.21.2",
     "fastify": "^5.2.1",
+    "handlebars": "^4.7.8",
     "puppeteer": "^24.1.1",
     "qrcode": "^1.5.4",
     "tmp": "^0.2.3",
