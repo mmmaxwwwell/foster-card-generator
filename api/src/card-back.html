@@ -1,173 +1,420 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Card Generator</title>
     <link rel="stylesheet" href="./card.css">
+    <script src="./qrcode/min.js"></script>
 </head>
+
 <body>
     <div id="page" class="no-space">
         <div id="card-back1" class="business-card business-card-back">
             <span class="no-space centered">~slug~</span>
-            <img class="qr-code" src="./qr.svg" alt="QR Code">
+            <div id="qrcode1"></div>
+            <script type="text/javascript">
+                new QRCode(document.getElementById("qrcode1"), "~slug~");
+            </script>
             <div class="attributes">
                 <table>
-                    <tr><td>Age:</td><td>~ageLong~</td></tr>
-                    <tr><td>Gender:</td><td>~gender~</td></tr>
-                    <tr><td>Size:</td><td>~size~</td></tr>
-                    <tr><td>Shots:</td><td>~shots~</td></tr>
-                    <tr><td>Housetrained:</td><td>~housetrained~</td></tr>
-                    <tr><td>OK with kids:</td><td>~kids~</td></tr>
-                    <tr><td>OK with dogs:</td><td>~dogs~</td></tr>
-                    <tr><td>OK with cats:</td><td>~cats~</td></tr>
+                    <tr>
+                        <td>Age:</td>
+                        <td>~ageLong~</td>
+                    </tr>
+                    <tr>
+                        <td>Gender:</td>
+                        <td>~gender~</td>
+                    </tr>
+                    <tr>
+                        <td>Size:</td>
+                        <td>~size~</td>
+                    </tr>
+                    <tr>
+                        <td>Shots:</td>
+                        <td>~shots~</td>
+                    </tr>
+                    <tr>
+                        <td>Housetrained:</td>
+                        <td>~housetrained~</td>
+                    </tr>
+                    <tr>
+                        <td>OK with kids:</td>
+                        <td>~kids~</td>
+                    </tr>
+                    <tr>
+                        <td>OK with dogs:</td>
+                        <td>~dogs~</td>
+                    </tr>
+                    <tr>
+                        <td>OK with cats:</td>
+                        <td>~cats~</td>
+                    </tr>
                 </table>
             </div>
         </div>
         <div id="card-back2" class="business-card business-card-back">
             <span class="no-space centered">~slug~</span>
-            <img class="qr-code" src="./qr.svg" alt="QR Code">
+            <img src="https://chart.googleapis.com/chart?chs=128x128&cht=qr&chl=~slug~" alt="QR Code">
             <div class="attributes">
                 <table>
-                    <tr><td>Age:</td><td>~ageLong~</td></tr>
-                    <tr><td>Gender:</td><td>~gender~</td></tr>
-                    <tr><td>Size:</td><td>~size~</td></tr>
-                    <tr><td>Shots:</td><td>~shots~</td></tr>
-                    <tr><td>Housetrained:</td><td>~housetrained~</td></tr>
-                    <tr><td>OK with kids:</td><td>~kids~</td></tr>
-                    <tr><td>OK with dogs:</td><td>~dogs~</td></tr>
-                    <tr><td>OK with cats:</td><td>~cats~</td></tr>
+                    <tr>
+                        <td>Age:</td>
+                        <td>~ageLong~</td>
+                    </tr>
+                    <tr>
+                        <td>Gender:</td>
+                        <td>~gender~</td>
+                    </tr>
+                    <tr>
+                        <td>Size:</td>
+                        <td>~size~</td>
+                    </tr>
+                    <tr>
+                        <td>Shots:</td>
+                        <td>~shots~</td>
+                    </tr>
+                    <tr>
+                        <td>Housetrained:</td>
+                        <td>~housetrained~</td>
+                    </tr>
+                    <tr>
+                        <td>OK with kids:</td>
+                        <td>~kids~</td>
+                    </tr>
+                    <tr>
+                        <td>OK with dogs:</td>
+                        <td>~dogs~</td>
+                    </tr>
+                    <tr>
+                        <td>OK with cats:</td>
+                        <td>~cats~</td>
+                    </tr>
                 </table>
             </div>
         </div>
         <div id="card-back3" class="business-card business-card-back">
             <span class="no-space centered">~slug~</span>
-            <img class="qr-code" src="./qr.svg" alt="QR Code">
+            <img src="https://chart.googleapis.com/chart?chs=128x128&cht=qr&chl=~slug~" alt="QR Code">
             <div class="attributes">
                 <table>
-                    <tr><td>Age:</td><td>~ageLong~</td></tr>
-                    <tr><td>Gender:</td><td>~gender~</td></tr>
-                    <tr><td>Size:</td><td>~size~</td></tr>
-                    <tr><td>Shots:</td><td>~shots~</td></tr>
-                    <tr><td>Housetrained:</td><td>~housetrained~</td></tr>
-                    <tr><td>OK with kids:</td><td>~kids~</td></tr>
-                    <tr><td>OK with dogs:</td><td>~dogs~</td></tr>
-                    <tr><td>OK with cats:</td><td>~cats~</td></tr>
+                    <tr>
+                        <td>Age:</td>
+                        <td>~ageLong~</td>
+                    </tr>
+                    <tr>
+                        <td>Gender:</td>
+                        <td>~gender~</td>
+                    </tr>
+                    <tr>
+                        <td>Size:</td>
+                        <td>~size~</td>
+                    </tr>
+                    <tr>
+                        <td>Shots:</td>
+                        <td>~shots~</td>
+                    </tr>
+                    <tr>
+                        <td>Housetrained:</td>
+                        <td>~housetrained~</td>
+                    </tr>
+                    <tr>
+                        <td>OK with kids:</td>
+                        <td>~kids~</td>
+                    </tr>
+                    <tr>
+                        <td>OK with dogs:</td>
+                        <td>~dogs~</td>
+                    </tr>
+                    <tr>
+                        <td>OK with cats:</td>
+                        <td>~cats~</td>
+                    </tr>
                 </table>
             </div>
         </div>
         <div id="card-back4" class="business-card business-card-back">
             <span class="no-space centered">~slug~</span>
-            <img class="qr-code" src="./qr.svg" alt="QR Code">
+            <img src="https://chart.googleapis.com/chart?chs=128x128&cht=qr&chl=~slug~" alt="QR Code">
             <div class="attributes">
                 <table>
-                    <tr><td>Age:</td><td>~ageLong~</td></tr>
-                    <tr><td>Gender:</td><td>~gender~</td></tr>
-                    <tr><td>Size:</td><td>~size~</td></tr>
-                    <tr><td>Shots:</td><td>~shots~</td></tr>
-                    <tr><td>Housetrained:</td><td>~housetrained~</td></tr>
-                    <tr><td>OK with kids:</td><td>~kids~</td></tr>
-                    <tr><td>OK with dogs:</td><td>~dogs~</td></tr>
-                    <tr><td>OK with cats:</td><td>~cats~</td></tr>
+                    <tr>
+                        <td>Age:</td>
+                        <td>~ageLong~</td>
+                    </tr>
+                    <tr>
+                        <td>Gender:</td>
+                        <td>~gender~</td>
+                    </tr>
+                    <tr>
+                        <td>Size:</td>
+                        <td>~size~</td>
+                    </tr>
+                    <tr>
+                        <td>Shots:</td>
+                        <td>~shots~</td>
+                    </tr>
+                    <tr>
+                        <td>Housetrained:</td>
+                        <td>~housetrained~</td>
+                    </tr>
+                    <tr>
+                        <td>OK with kids:</td>
+                        <td>~kids~</td>
+                    </tr>
+                    <tr>
+                        <td>OK with dogs:</td>
+                        <td>~dogs~</td>
+                    </tr>
+                    <tr>
+                        <td>OK with cats:</td>
+                        <td>~cats~</td>
+                    </tr>
                 </table>
             </div>
         </div>
         <div id="card-back5" class="business-card business-card-back">
             <span class="no-space centered">~slug~</span>
-            <img class="qr-code" src="./qr.svg" alt="QR Code">
+            <img src="https://chart.googleapis.com/chart?chs=128x128&cht=qr&chl=~slug~" alt="QR Code">
             <div class="attributes">
                 <table>
-                    <tr><td>Age:</td><td>~ageLong~</td></tr>
-                    <tr><td>Gender:</td><td>~gender~</td></tr>
-                    <tr><td>Size:</td><td>~size~</td></tr>
-                    <tr><td>Shots:</td><td>~shots~</td></tr>
-                    <tr><td>Housetrained:</td><td>~housetrained~</td></tr>
-                    <tr><td>OK with kids:</td><td>~kids~</td></tr>
-                    <tr><td>OK with dogs:</td><td>~dogs~</td></tr>
-                    <tr><td>OK with cats:</td><td>~cats~</td></tr>
+                    <tr>
+                        <td>Age:</td>
+                        <td>~ageLong~</td>
+                    </tr>
+                    <tr>
+                        <td>Gender:</td>
+                        <td>~gender~</td>
+                    </tr>
+                    <tr>
+                        <td>Size:</td>
+                        <td>~size~</td>
+                    </tr>
+                    <tr>
+                        <td>Shots:</td>
+                        <td>~shots~</td>
+                    </tr>
+                    <tr>
+                        <td>Housetrained:</td>
+                        <td>~housetrained~</td>
+                    </tr>
+                    <tr>
+                        <td>OK with kids:</td>
+                        <td>~kids~</td>
+                    </tr>
+                    <tr>
+                        <td>OK with dogs:</td>
+                        <td>~dogs~</td>
+                    </tr>
+                    <tr>
+                        <td>OK with cats:</td>
+                        <td>~cats~</td>
+                    </tr>
                 </table>
             </div>
         </div>
         <div id="card-back6" class="business-card business-card-back">
             <span class="no-space centered">~slug~</span>
-            <img class="qr-code" src="./qr.svg" alt="QR Code">
+            <img src="https://chart.googleapis.com/chart?chs=128x128&cht=qr&chl=~slug~" alt="QR Code">
             <div class="attributes">
                 <table>
-                    <tr><td>Age:</td><td>~ageLong~</td></tr>
-                    <tr><td>Gender:</td><td>~gender~</td></tr>
-                    <tr><td>Size:</td><td>~size~</td></tr>
-                    <tr><td>Shots:</td><td>~shots~</td></tr>
-                    <tr><td>Housetrained:</td><td>~housetrained~</td></tr>
-                    <tr><td>OK with kids:</td><td>~kids~</td></tr>
-                    <tr><td>OK with dogs:</td><td>~dogs~</td></tr>
-                    <tr><td>OK with cats:</td><td>~cats~</td></tr>
+                    <tr>
+                        <td>Age:</td>
+                        <td>~ageLong~</td>
+                    </tr>
+                    <tr>
+                        <td>Gender:</td>
+                        <td>~gender~</td>
+                    </tr>
+                    <tr>
+                        <td>Size:</td>
+                        <td>~size~</td>
+                    </tr>
+                    <tr>
+                        <td>Shots:</td>
+                        <td>~shots~</td>
+                    </tr>
+                    <tr>
+                        <td>Housetrained:</td>
+                        <td>~housetrained~</td>
+                    </tr>
+                    <tr>
+                        <td>OK with kids:</td>
+                        <td>~kids~</td>
+                    </tr>
+                    <tr>
+                        <td>OK with dogs:</td>
+                        <td>~dogs~</td>
+                    </tr>
+                    <tr>
+                        <td>OK with cats:</td>
+                        <td>~cats~</td>
+                    </tr>
                 </table>
             </div>
         </div>
         <div id="card-back7" class="business-card business-card-back">
             <span class="no-space centered">~slug~</span>
-            <img class="qr-code" src="./qr.svg" alt="QR Code">
+            <img src="https://chart.googleapis.com/chart?chs=128x128&cht=qr&chl=~slug~" alt="QR Code">
             <div class="attributes">
                 <table>
-                    <tr><td>Age:</td><td>~ageLong~</td></tr>
-                    <tr><td>Gender:</td><td>~gender~</td></tr>
-                    <tr><td>Size:</td><td>~size~</td></tr>
-                    <tr><td>Shots:</td><td>~shots~</td></tr>
-                    <tr><td>Housetrained:</td><td>~housetrained~</td></tr>
-                    <tr><td>OK with kids:</td><td>~kids~</td></tr>
-                    <tr><td>OK with dogs:</td><td>~dogs~</td></tr>
-                    <tr><td>OK with cats:</td><td>~cats~</td></tr>
+                    <tr>
+                        <td>Age:</td>
+                        <td>~ageLong~</td>
+                    </tr>
+                    <tr>
+                        <td>Gender:</td>
+                        <td>~gender~</td>
+                    </tr>
+                    <tr>
+                        <td>Size:</td>
+                        <td>~size~</td>
+                    </tr>
+                    <tr>
+                        <td>Shots:</td>
+                        <td>~shots~</td>
+                    </tr>
+                    <tr>
+                        <td>Housetrained:</td>
+                        <td>~housetrained~</td>
+                    </tr>
+                    <tr>
+                        <td>OK with kids:</td>
+                        <td>~kids~</td>
+                    </tr>
+                    <tr>
+                        <td>OK with dogs:</td>
+                        <td>~dogs~</td>
+                    </tr>
+                    <tr>
+                        <td>OK with cats:</td>
+                        <td>~cats~</td>
+                    </tr>
                 </table>
             </div>
         </div>
         <div id="card-back8" class="business-card business-card-back">
             <span class="no-space centered">~slug~</span>
-            <img class="qr-code" src="./qr.svg" alt="QR Code">
+            <img src="https://chart.googleapis.com/chart?chs=128x128&cht=qr&chl=~slug~" alt="QR Code">
             <div class="attributes">
                 <table>
-                    <tr><td>Age:</td><td>~ageLong~</td></tr>
-                    <tr><td>Gender:</td><td>~gender~</td></tr>
-                    <tr><td>Size:</td><td>~size~</td></tr>
-                    <tr><td>Shots:</td><td>~shots~</td></tr>
-                    <tr><td>Housetrained:</td><td>~housetrained~</td></tr>
-                    <tr><td>OK with kids:</td><td>~kids~</td></tr>
-                    <tr><td>OK with dogs:</td><td>~dogs~</td></tr>
-                    <tr><td>OK with cats:</td><td>~cats~</td></tr>
+                    <tr>
+                        <td>Age:</td>
+                        <td>~ageLong~</td>
+                    </tr>
+                    <tr>
+                        <td>Gender:</td>
+                        <td>~gender~</td>
+                    </tr>
+                    <tr>
+                        <td>Size:</td>
+                        <td>~size~</td>
+                    </tr>
+                    <tr>
+                        <td>Shots:</td>
+                        <td>~shots~</td>
+                    </tr>
+                    <tr>
+                        <td>Housetrained:</td>
+                        <td>~housetrained~</td>
+                    </tr>
+                    <tr>
+                        <td>OK with kids:</td>
+                        <td>~kids~</td>
+                    </tr>
+                    <tr>
+                        <td>OK with dogs:</td>
+                        <td>~dogs~</td>
+                    </tr>
+                    <tr>
+                        <td>OK with cats:</td>
+                        <td>~cats~</td>
+                    </tr>
                 </table>
             </div>
         </div>
         <div id="card-back9" class="business-card business-card-back">
             <span class="no-space centered">~slug~</span>
-            <img class="qr-code" src="./qr.svg" alt="QR Code">
+            <img src="https://chart.googleapis.com/chart?chs=128x128&cht=qr&chl=~slug~" alt="QR Code">
             <div class="attributes">
                 <table>
-                    <tr><td>Age:</td><td>~ageLong~</td></tr>
-                    <tr><td>Gender:</td><td>~gender~</td></tr>
-                    <tr><td>Size:</td><td>~size~</td></tr>
-                    <tr><td>Shots:</td><td>~shots~</td></tr>
-                    <tr><td>Housetrained:</td><td>~housetrained~</td></tr>
-                    <tr><td>OK with kids:</td><td>~kids~</td></tr>
-                    <tr><td>OK with dogs:</td><td>~dogs~</td></tr>
-                    <tr><td>OK with cats:</td><td>~cats~</td></tr>
+                    <tr>
+                        <td>Age:</td>
+                        <td>~ageLong~</td>
+                    </tr>
+                    <tr>
+                        <td>Gender:</td>
+                        <td>~gender~</td>
+                    </tr>
+                    <tr>
+                        <td>Size:</td>
+                        <td>~size~</td>
+                    </tr>
+                    <tr>
+                        <td>Shots:</td>
+                        <td>~shots~</td>
+                    </tr>
+                    <tr>
+                        <td>Housetrained:</td>
+                        <td>~housetrained~</td>
+                    </tr>
+                    <tr>
+                        <td>OK with kids:</td>
+                        <td>~kids~</td>
+                    </tr>
+                    <tr>
+                        <td>OK with dogs:</td>
+                        <td>~dogs~</td>
+                    </tr>
+                    <tr>
+                        <td>OK with cats:</td>
+                        <td>~cats~</td>
+                    </tr>
                 </table>
             </div>
         </div>
         <div id="card-back10" class="business-card business-card-back">
             <span class="no-space centered">~slug~</span>
-            <img class="qr-code" src="./qr.svg" alt="QR Code">
+            <img src="https://chart.googleapis.com/chart?chs=128x128&cht=qr&chl=~slug~" alt="QR Code">
             <div class="attributes">
                 <table>
-                    <tr><td>Age:</td><td>~ageLong~</td></tr>
-                    <tr><td>Gender:</td><td>~gender~</td></tr>
-                    <tr><td>Size:</td><td>~size~</td></tr>
-                    <tr><td>Shots:</td><td>~shots~</td></tr>
-                    <tr><td>Housetrained:</td><td>~housetrained~</td></tr>
-                    <tr><td>OK with kids:</td><td>~kids~</td></tr>
-                    <tr><td>OK with dogs:</td><td>~dogs~</td></tr>
-                    <tr><td>OK with cats:</td><td>~cats~</td></tr>
+                    <tr>
+                        <td>Age:</td>
+                        <td>~ageLong~</td>
+                    </tr>
+                    <tr>
+                        <td>Gender:</td>
+                        <td>~gender~</td>
+                    </tr>
+                    <tr>
+                        <td>Size:</td>
+                        <td>~size~</td>
+                    </tr>
+                    <tr>
+                        <td>Shots:</td>
+                        <td>~shots~</td>
+                    </tr>
+                    <tr>
+                        <td>Housetrained:</td>
+                        <td>~housetrained~</td>
+                    </tr>
+                    <tr>
+                        <td>OK with kids:</td>
+                        <td>~kids~</td>
+                    </tr>
+                    <tr>
+                        <td>OK with dogs:</td>
+                        <td>~dogs~</td>
+                    </tr>
+                    <tr>
+                        <td>OK with cats:</td>
+                        <td>~cats~</td>
+                    </tr>
                 </table>
             </div>
         </div>
     </div>
 </body>
+
 </html>

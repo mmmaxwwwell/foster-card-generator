@@ -3,14 +3,17 @@ const tmp = require('tmp');
 const fs = require('fs').promises;
 const rimraf = require('rimraf');
 const path = require('path');
+const yaml = require('js-yaml');
+const fsSync = require('fs');
 
-async function createTempDir() {
+async function createTempDir(params) {
     return new Promise((resolve, reject) => {
         tmp.dir({ prefix: 'foster-card-', tmpdir: '/tmp' }, (err, tmpPath, cleanupCallback) => {
             if (err) {
                 reject(err);
             } else {
-                const assets = ['card.css', 'portrait.jpeg', 'qr.svg', 'logo.png']; // add more asset filenames as needed
+                fsSync.mkdirSync(path.join(tmpPath, 'images'), { recursive: true });
+                const assets = ['card.css', 'images/' + params.portraitPath , 'qr.svg', 'logo.png', 'qrcode.min.js']; // add more asset filenames as needed
                 Promise.all(
                     assets.map(asset =>
                         fs.copyFile(
@@ -56,27 +59,11 @@ async function capture(page, divName) {
     });
 }
 
-(async () => {
+async function generateCard(params) {
     const browser = await puppeteer.launch();
     const page = await browser.newPage();
 
-    let {tmpPath, cleanup} = await createTempDir();
-
-    let params = {
-        name: "Doug",
-        slug: "example.com",
-        size: "Medium",
-        shots: true,
-        housetrained: true,
-        breed: "Heeler",
-        ageLong: "6 Months",
-        ageShort: "6 Mo",
-        gender: "Neutered(M)",
-        kids: true,
-        dogs: true,
-        cats: false,
-        portraitPath: "./portrait.jpeg"
-    }
+    let {tmpPath, cleanup} = await createTempDir(params);
 
     await replaceParametersInHtml("card-front.html", tmpPath, params)
     await replaceParametersInHtml("card-back.html", tmpPath, params)
@@ -96,5 +83,20 @@ async function capture(page, divName) {
     await browser.close();
 
     await cleanup();
+}
+
+(async () => {
+    const dogDir = path.join(process.cwd(), 'src', 'dogs.d');
+    const dogFiles = await fs.readdir(dogDir);
+
+    const dogParams = await Promise.all(dogFiles.map(async file => {
+        const filePath = path.join(dogDir, file);
+        const fileContents = await fs.readFile(filePath, 'utf8');
+        return yaml.load(fileContents);
+    }));
+
+    for (const params of dogParams) {
+        await generateCard(params);
+    }
 })();
 
