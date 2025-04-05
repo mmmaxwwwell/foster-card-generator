@@ -44,8 +44,10 @@ async function replaceParametersInHtml(fileName, outputPath, params) {
             console.error('Error generating QR code:', err);
             params.qrcode = `https://chart.googleapis.com/chart?chs=128x128&cht=qr&chl=${encodeURIComponent(params.slug || params.adoptionUrl)}`;
         }
-        
-        // Add cards array for the loop (10 cards)
+    }
+    
+    // Add cards array for the loop (10 cards) for both front and back templates
+    if (fileName === 'card-back.html' || fileName === 'card-front.html') {
         params.cards = Array(10).fill({});
     }
 

@@ -1,3 +1,4 @@
+//
 export class DogProfile {
     id?: number;
     name: string;

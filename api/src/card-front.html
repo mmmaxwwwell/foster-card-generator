@@ -8,66 +8,14 @@
 </head>
 <body>
     <div id="page" class="no-space">
-        <div class="business-card business-card-front">
+        {{#each cards}}
+        <div id="card-front{{@index}}" class="business-card business-card-front">
             <img src="./logo.png" alt="Paws Rescue League Logo" class="logo no-space">
             <span class="no-space">www.pawsrescueleague.org</span>
-            <img src="images/~portraitPath~" alt="Portrait" class="portrait no-space ">
-            <span class="no-space">~name~<br>~ageShort~ ~breed~</span>
+            <img src="images/{{../portraitPath}}" alt="Portrait" class="portrait no-space ">
+            <span class="no-space">{{../name}}<br>{{../ageShort}} {{../breed}}</span>
         </div>
-        <div class="business-card business-card-front">
-            <img src="./logo.png" alt="Paws Rescue League Logo" class="logo no-space">
-            <span class="no-space">www.pawsrescueleague.org</span>
-            <img src="images/~portraitPath~" alt="Portrait" class="portrait no-space ">
-            <span class="no-space">~name~<br>~ageShort~ ~breed~</span>
-        </div>
-        <div class="business-card business-card-front">
-            <img src="./logo.png" alt="Paws Rescue League Logo" class="logo no-space">
-            <span class="no-space">www.pawsrescueleague.org</span>
-            <img src="images/~portraitPath~" alt="Portrait" class="portrait no-space ">
-            <span class="no-space">~name~<br>~ageShort~ ~breed~</span>
-        </div>
-        <div class="business-card business-card-front">
-            <img src="./logo.png" alt="Paws Rescue League Logo" class="logo no-space">
-            <span class="no-space">www.pawsrescueleague.org</span>
-            <img src="images/~portraitPath~" alt="Portrait" class="portrait no-space ">
-            <span class="no-space">~name~<br>~ageShort~ ~breed~</span>
-        </div>
-        <div class="business-card business-card-front">
-            <img src="./logo.png" alt="Paws Rescue League Logo" class="logo no-space">
-            <span class="no-space">www.pawsrescueleague.org</span>
-            <img src="images/~portraitPath~" alt="Portrait" class="portrait no-space ">
-            <span class="no-space">~name~<br>~ageShort~ ~breed~</span>
-        </div>
-        <div class="business-card business-card-front">
-            <img src="./logo.png" alt="Paws Rescue League Logo" class="logo no-space">
-            <span class="no-space">www.pawsrescueleague.org</span>
-            <img src="images/~portraitPath~" alt="Portrait" class="portrait no-space ">
-            <span class="no-space">~name~<br>~ageShort~ ~breed~</span>
-        </div>
-        <div class="business-card business-card-front">
-            <img src="./logo.png" alt="Paws Rescue League Logo" class="logo no-space">
-            <span class="no-space">www.pawsrescueleague.org</span>
-            <img src="images/~portraitPath~" alt="Portrait" class="portrait no-space ">
-            <span class="no-space">~name~<br>~ageShort~ ~breed~</span>
-        </div>
-        <div class="business-card business-card-front">
-            <img src="./logo.png" alt="Paws Rescue League Logo" class="logo no-space">
-            <span class="no-space">www.pawsrescueleague.org</span>
-            <img src="images/~portraitPath~" alt="Portrait" class="portrait no-space ">
-            <span class="no-space">~name~<br>~ageShort~ ~breed~</span>
-        </div>
-        <div class="business-card business-card-front">
-            <img src="./logo.png" alt="Paws Rescue League Logo" class="logo no-space">
-            <span class="no-space">www.pawsrescueleague.org</span>
-            <img src="images/~portraitPath~" alt="Portrait" class="portrait no-space ">
-            <span class="no-space">~name~<br>~ageShort~ ~breed~</span>
-        </div>
-        <div class="business-card business-card-front">
-            <img src="./logo.png" alt="Paws Rescue League Logo" class="logo no-space">
-            <span class="no-space">www.pawsrescueleague.org</span>
-            <img src="images/~portraitPath~" alt="Portrait" class="portrait no-space ">
-            <span class="no-space">~name~<br>~ageShort~ ~breed~</span>
-        </div>
+        {{/each}}
     </div>
 </body>
 </html>
