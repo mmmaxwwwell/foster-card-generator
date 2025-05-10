@@ -7,6 +7,7 @@ const yaml = require('js-yaml');
 const fsSync = require('fs');
 const QRCode = require('qrcode');
 const Handlebars = require('handlebars');
+
 async function createTempDir(params) {
     return new Promise((resolve, reject) => {
         tmp.dir({ prefix: 'foster-card-', tmpdir: '/tmp' }, (err, tmpPath, cleanupCallback) => {
