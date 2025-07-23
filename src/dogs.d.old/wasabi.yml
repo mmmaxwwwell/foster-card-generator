@@ -1,0 +1,13 @@
+name: "Wasabi" # the name of the dog
+slug: "wagtopia.com/search/pet?id=2410077" # url where the potential adopter can go to submit an application
+size: "Medium" # the weight of the dog in lbs if know, if not general size when full grown like "medium"
+shots: true # if the dog is up to date on shots medically
+housetrained: false # if the dog is housetrained
+breed: "Shar Pei" # the breed of the dog
+ageLong: "2 Months" # the long age of the dog. 1 Month. Two Years.
+ageShort: "2 mo" # the short age of the dog. 1 Mo. 2 yr.
+gender: "Female" # the gender and if desexed. Female, Male, Spayed(F), Neutered(M).
+kids: true # If the dog is good with kids
+dogs: true # If the dog is good with other dogs
+cats: true # IF the dog is good with cats
+portraitPath: "wasabi.png" # Path to a portrait of the dog.

@@ -1,0 +1,13 @@
+name: "Nala" # the name of the dog
+slug: "wagtopia.com/search/pet?id=2401110" # url where the potential adopter can go to submit an application
+size: "20 lb" # the weight of the dog in lbs if know, if not general size when full grown like "medium"
+shots: true # if the dog is up to date on shots medically
+housetrained: true # if the dog is housetrained
+breed: "Pug" # the breed of the dog
+ageLong: "5 Years" # the long age of the dog. 1 Month. Two Years.
+ageShort: "5 yr" # the short age of the dog. 1 Mo. 2 yr.
+gender: "Spayed(F)" # the gender and if desexed. Female, Male, Spayed(F), Neutered(M).
+kids: true # If the dog is good with kids
+dogs: true # If the dog is good with other dogs
+cats: true # IF the dog is good with cats
+portraitPath: "nala.jpg" # Path to a portrait of the dog.
