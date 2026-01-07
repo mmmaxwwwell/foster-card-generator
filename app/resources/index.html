@@ -145,6 +145,45 @@
         .compat-no { background: #f8d7da; color: #721c24; }
         .compat-unknown { background: #e2e3e5; color: #383d41; }
 
+        .card-actions {
+            display: flex;
+            gap: 8px;
+            margin-top: 15px;
+            padding-top: 15px;
+            border-top: 1px solid #eee;
+        }
+
+        .card-actions button {
+            flex: 1;
+            padding: 8px 12px;
+            border: none;
+            border-radius: 6px;
+            font-size: 0.85rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .btn-print-front {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+
+        .btn-print-front:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 2px 8px rgba(102, 126, 234, 0.4);
+        }
+
+        .btn-print-back {
+            background: #f0f0f0;
+            color: #333;
+        }
+
+        .btn-print-back:hover {
+            background: #e0e0e0;
+            transform: translateY(-1px);
+        }
+
         .loading {
             text-align: center;
             color: white;
@@ -404,6 +443,41 @@
                 opacity: 1;
             }
         }
+
+        .create-options {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+            padding: 30px;
+        }
+
+        .option-button {
+            padding: 30px;
+            border: 2px solid #e0e0e0;
+            border-radius: 12px;
+            background: white;
+            cursor: pointer;
+            transition: all 0.2s;
+            text-align: left;
+        }
+
+        .option-button:hover {
+            border-color: #667eea;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.2);
+        }
+
+        .option-button h3 {
+            color: #333;
+            font-size: 1.3rem;
+            margin-bottom: 8px;
+        }
+
+        .option-button p {
+            color: #666;
+            font-size: 0.95rem;
+            margin: 0;
+        }
     </style>
 </head>
 <body>
@@ -414,11 +488,172 @@
         </header>
 
         <div class="controls">
+            <button onclick="openCreateModal()">Create Animal</button>
             <button onclick="loadAnimals()">Refresh</button>
         </div>
 
         <div id="content" class="loading">
             Loading animals...
+        </div>
+    </div>
+
+    <!-- Create Animal Modal -->
+    <div id="createModal" class="modal-overlay">
+        <div class="modal">
+            <div class="modal-header">
+                <h2>Create New Animal</h2>
+                <button class="modal-close" onclick="closeCreateModal()">&times;</button>
+            </div>
+            <div class="create-options">
+                <button class="option-button" onclick="selectCreateOption('manual')">
+                    <h3>Enter Data</h3>
+                    <p>Manually enter all animal information and details</p>
+                </button>
+                <button class="option-button" onclick="selectCreateOption('scrape')">
+                    <h3>Scrape from URL</h3>
+                    <p>Import animal data from an adoption website URL</p>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- URL Scrape Modal -->
+    <div id="scrapeModal" class="modal-overlay">
+        <div class="modal">
+            <div class="modal-header">
+                <h2>Scrape from URL</h2>
+                <button class="modal-close" onclick="closeScrapeModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label for="scrapeUrl">Adoption Page URL</label>
+                    <input type="text" id="scrapeUrl" placeholder="https://example.com/adopt/dog-name" required>
+                </div>
+                <p style="color: #666; font-size: 0.9rem; margin-top: 10px;">
+                    Enter the URL of an animal adoption page to automatically extract information.
+                </p>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeScrapeModal()">Cancel</button>
+                <button class="btn btn-primary" onclick="scrapeUrl()">Scrape Data</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Manual Entry Modal -->
+    <div id="manualEntryModal" class="modal-overlay">
+        <div class="modal">
+            <div class="modal-header">
+                <h2>Create New Animal</h2>
+                <button class="modal-close" onclick="closeManualEntryModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="modal-image-container" onclick="addNewAnimalImage()">
+                    <div id="newAnimalNoImage" class="modal-no-image">🐕</div>
+                    <div class="image-overlay">
+                        <div class="image-overlay-text">
+                            <span>📷</span>
+                            Click to add photo
+                        </div>
+                    </div>
+                </div>
+                <form id="createForm">
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="newName">Name</label>
+                            <input type="text" id="newName" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="newBreed">Breed</label>
+                            <input type="text" id="newBreed" required>
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="newSlug">Adoption URL</label>
+                        <input type="text" id="newSlug" required>
+                    </div>
+
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="newAgeLong">Age (Long)</label>
+                            <input type="text" id="newAgeLong" placeholder="e.g., 2 Years" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="newAgeShort">Age (Short)</label>
+                            <input type="text" id="newAgeShort" placeholder="e.g., 2 Yr" required>
+                        </div>
+                    </div>
+
+                    <div class="form-row-3">
+                        <div class="form-group">
+                            <label for="newSize">Size</label>
+                            <select id="newSize" required>
+                                <option value="Small">Small</option>
+                                <option value="Medium" selected>Medium</option>
+                                <option value="Large">Large</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="newGender">Gender</label>
+                            <select id="newGender" required>
+                                <option value="Male">Male</option>
+                                <option value="Female">Female</option>
+                                <option value="Neutered(M)">Neutered(M)</option>
+                                <option value="Spayed(F)">Spayed(F)</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="newShots">Shots</label>
+                            <select id="newShots" required>
+                                <option value="1" selected>Yes</option>
+                                <option value="0">No</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="newHousetrained">Housetrained</label>
+                            <select id="newHousetrained" required>
+                                <option value="1" selected>Yes</option>
+                                <option value="0">No</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="form-row-3">
+                        <div class="form-group">
+                            <label for="newKids">Good with Kids</label>
+                            <select id="newKids" required>
+                                <option value="1">Yes</option>
+                                <option value="0">No</option>
+                                <option value="?" selected>Unknown</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="newDogs">Good with Dogs</label>
+                            <select id="newDogs" required>
+                                <option value="1">Yes</option>
+                                <option value="0">No</option>
+                                <option value="?" selected>Unknown</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="newCats">Good with Cats</label>
+                            <select id="newCats" required>
+                                <option value="1">Yes</option>
+                                <option value="0">No</option>
+                                <option value="?" selected>Unknown</option>
+                            </select>
+                        </div>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeManualEntryModal()">Cancel</button>
+                <button class="btn btn-primary" onclick="createAnimal()">Create Animal</button>
+            </div>
         </div>
     </div>
 

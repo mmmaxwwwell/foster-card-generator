@@ -2,3 +2,6 @@ node_modules/
 output/
 db/*.db
 app/bin
+app/.tmp
+example page/
+.tmp/

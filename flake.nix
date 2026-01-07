@@ -57,6 +57,7 @@
              chromium
              sqlite
              neutralinoWrapper
+             zenity  # Required for Neutralino file dialogs on Linux
            ] ++ neutralinoLibs;
            shellHook = ''
              export PUPPETEER_EXECUTABLE_PATH=${pkgs.chromium}/bin/chromium

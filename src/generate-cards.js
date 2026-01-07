@@ -52,10 +52,19 @@ async function replaceParametersInHtml(fileName, outputPath, params) {
         params.cards = Array(10).fill({});
     }
 
-    // Process boolean values
+    // Process boolean values and convert kids/dogs/cats to emojis
     const processedParams = { ...params };
     for (const key in processedParams) {
-        if (typeof processedParams[key] === 'boolean') {
+        // Special handling for kids, dogs, cats - use checkmark, X, and ?
+        if (key === 'kids' || key === 'dogs' || key === 'cats') {
+            if (processedParams[key] === true || processedParams[key] === 1 || processedParams[key] === '1') {
+                processedParams[key] = "✅";
+            } else if (processedParams[key] === false || processedParams[key] === 0 || processedParams[key] === '0') {
+                processedParams[key] = "❌";
+            } else {
+                processedParams[key] = "?";
+            }
+        } else if (typeof processedParams[key] === 'boolean') {
             processedParams[key] = processedParams[key] ? "✅" : "❌";
         } else if (processedParams[key] === 1) {
             processedParams[key] = "✅";

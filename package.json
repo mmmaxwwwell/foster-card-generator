@@ -6,13 +6,18 @@
     "db:migrate": "node db/migrate.js",
     "db:reset": "node db/migrate.js --reset",
     "db:query": "sqlite3 db/animals.db",
-    "app:run": "cd app && npx @neutralinojs/neu run",
-    "app:build": "cd app && npx @neutralinojs/neu build"
+    "start": "cd app && npx @neutralinojs/neu run",
+    "dev": "cd app && npx @neutralinojs/neu run -- --window-enable-inspector",
+    "build": "cd app && npx @neutralinojs/neu build",
+    "test:scraper": "node test-scraper-integration.js",
+    "test:scraper:local": "USE_LOCAL_FILE=true node test-scraper-integration.js"
   },
   "author": "",
   "license": "ISC",
   "description": "",
   "dependencies": {
+    "axios": "^1.6.0",
+    "cheerio": "^1.0.0",
     "handlebars": "^4.7.8",
     "js-yaml": "^4.1.0",
     "puppeteer": "^24.1.1",

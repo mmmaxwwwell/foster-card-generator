@@ -4,13 +4,26 @@ const DB_PATH = '../db/animals.db';
 let animals = [];
 let currentAnimal = null;
 let pendingImageData = null; // Stores new image data before save
+let newAnimalImageData = null; // Stores image data for new animal
 
 async function runSQL(sql) {
     try {
+        // Use stdin to avoid command line length limits with large image data
+        // Create a temporary file with the SQL
+        const tmpFile = `./.tmp/sql-${Date.now()}.sql`;
+        await Neutralino.filesystem.writeFile(tmpFile, sql);
+
         const result = await Neutralino.os.execCommand(
-            `sqlite3 "${DB_PATH}" "${sql.replace(/"/g, '\\"')}"`,
+            `sqlite3 "${DB_PATH}" < "${tmpFile}"`,
             { cwd: NL_PATH }
         );
+
+        // Clean up temp file
+        try {
+            await Neutralino.filesystem.removeFile(tmpFile);
+        } catch (cleanupErr) {
+            console.warn('[App] Could not delete temp SQL file:', cleanupErr);
+        }
 
         if (result.exitCode !== 0) {
             throw new Error(result.stdErr || 'Database query failed');
@@ -106,38 +119,43 @@ function renderAnimalCard(animal) {
     const cats = formatCompatibility(animal.cats);
 
     return `
-        <div class="animal-card" data-id="${animal.id}" onclick="openEditModal(${animal.id})">
-            <div class="animal-image-container">
+        <div class="animal-card" data-id="${animal.id}">
+            <div class="animal-image-container" onclick="openEditModal(${animal.id})">
                 ${animal.imageDataUrl
                     ? `<img class="animal-image" src="${animal.imageDataUrl}" alt="${animal.name}">`
                     : `<div class="no-image">🐕</div>`
                 }
             </div>
             <div class="animal-info">
-                <h2 class="animal-name">${animal.name}</h2>
-                <p class="animal-breed">${animal.breed}</p>
-                <div class="animal-details">
-                    <div class="detail">
-                        <span class="detail-label">Age:</span>
-                        <span class="detail-value">${animal.age_long}</span>
+                <div onclick="openEditModal(${animal.id})" style="cursor: pointer;">
+                    <h2 class="animal-name">${animal.name}</h2>
+                    <p class="animal-breed">${animal.breed}</p>
+                    <div class="animal-details">
+                        <div class="detail">
+                            <span class="detail-label">Age:</span>
+                            <span class="detail-value">${animal.age_long}</span>
+                        </div>
+                        <div class="detail">
+                            <span class="detail-label">Size:</span>
+                            <span class="detail-value">${animal.size}</span>
+                        </div>
+                        <div class="detail">
+                            <span class="detail-label">Gender:</span>
+                            <span class="detail-value">${animal.gender}</span>
+                        </div>
+                        <div class="detail">
+                            <span class="detail-label">Shots:</span>
+                            <span class="detail-value">${animal.shots ? 'Yes' : 'No'}</span>
+                        </div>
                     </div>
-                    <div class="detail">
-                        <span class="detail-label">Size:</span>
-                        <span class="detail-value">${animal.size}</span>
-                    </div>
-                    <div class="detail">
-                        <span class="detail-label">Gender:</span>
-                        <span class="detail-value">${animal.gender}</span>
-                    </div>
-                    <div class="detail">
-                        <span class="detail-label">Shots:</span>
-                        <span class="detail-value">${animal.shots ? 'Yes' : 'No'}</span>
+                    <div class="compatibility">
+                        <span class="compat-badge ${kids.class}">Kids: ${kids.text}</span>
+                        <span class="compat-badge ${dogs.class}">Dogs: ${dogs.text}</span>
+                        <span class="compat-badge ${cats.class}">Cats: ${cats.text}</span>
                     </div>
                 </div>
-                <div class="compatibility">
-                    <span class="compat-badge ${kids.class}">Kids: ${kids.text}</span>
-                    <span class="compat-badge ${dogs.class}">Dogs: ${dogs.text}</span>
-                    <span class="compat-badge ${cats.class}">Cats: ${cats.text}</span>
+                <div class="card-actions">
+                    <button class="btn-generate-cards" onclick="event.stopPropagation(); generateCards(${animal.id})">Generate Cards</button>
                 </div>
             </div>
         </div>
@@ -187,6 +205,349 @@ async function loadAnimals() {
             </div>
         `;
         subtitle.textContent = 'Error loading data';
+    }
+}
+
+// Create Animal Modal functions
+function openCreateModal() {
+    document.getElementById('createModal').classList.add('active');
+}
+
+function closeCreateModal() {
+    document.getElementById('createModal').classList.remove('active');
+}
+
+function selectCreateOption(option) {
+    closeCreateModal();
+
+    if (option === 'manual') {
+        openManualEntryModal();
+    } else if (option === 'scrape') {
+        openScrapeModal();
+    }
+}
+
+// Scrape Modal functions
+function openScrapeModal() {
+    document.getElementById('scrapeModal').classList.add('active');
+    document.getElementById('scrapeUrl').value = '';
+}
+
+function closeScrapeModal() {
+    document.getElementById('scrapeModal').classList.remove('active');
+}
+
+async function scrapeUrl() {
+    const url = document.getElementById('scrapeUrl').value.trim();
+
+    if (!url) {
+        showToast('Please enter a URL', 'error');
+        return;
+    }
+
+    try {
+        showToast('Scraping data from URL...', 'success');
+        console.log('[App] Starting scrape for URL:', url);
+
+        // Call the scraper script
+        const command = `node scrape-url.js "${url.replace(/"/g, '\\"')}"`;
+        console.log('[App] Executing scraper command');
+
+        const result = await Neutralino.os.execCommand(command, { cwd: NL_PATH });
+
+        console.log('[App] Scraper exit code:', result.exitCode);
+
+        // Log stderr (debug messages from scraper)
+        if (result.stdErr) {
+            const lines = result.stdErr.split('\n');
+            for (const line of lines) {
+                if (line.trim()) {
+                    console.log('[Scraper]', line);
+                }
+            }
+        }
+
+        if (result.exitCode !== 0) {
+            throw new Error(result.stdErr || 'Scraping failed');
+        }
+
+        // Parse the scraped data from stdout
+        const scrapedData = JSON.parse(result.stdOut.trim());
+        console.log('[App] Scraped data:', scrapedData);
+
+        // Close scrape modal
+        closeScrapeModal();
+
+        // Load image if available
+        if (scrapedData.imagePath) {
+            try {
+                // Convert relative path to absolute path (relative to NL_PATH)
+                const imagePath = scrapedData.imagePath.startsWith('/')
+                    ? scrapedData.imagePath
+                    : `${NL_PATH}/${scrapedData.imagePath}`;
+                console.log('[App] Loading scraped image from:', imagePath);
+
+                // Read the image file
+                const data = await Neutralino.filesystem.readBinaryFile(imagePath);
+
+                // Determine MIME type
+                const ext = imagePath.split('.').pop().toLowerCase();
+                const mimeTypes = {
+                    'jpg': 'image/jpeg',
+                    'jpeg': 'image/jpeg',
+                    'png': 'image/png',
+                    'gif': 'image/gif',
+                    'webp': 'image/webp'
+                };
+                const mime = mimeTypes[ext] || 'image/jpeg';
+
+                // Convert to hex for database
+                const uint8Array = new Uint8Array(data);
+                let hexString = '';
+                for (let i = 0; i < uint8Array.length; i++) {
+                    hexString += uint8Array[i].toString(16).padStart(2, '0');
+                }
+
+                // Store image data
+                newAnimalImageData = {
+                    hex: hexString,
+                    mime: mime,
+                    path: imagePath.split('/').pop()
+                };
+
+                // Convert to base64 for preview
+                let binary = '';
+                for (let i = 0; i < uint8Array.length; i++) {
+                    binary += String.fromCharCode(uint8Array[i]);
+                }
+                const base64 = btoa(binary);
+                scrapedData.imageDataUrl = `data:${mime};base64,${base64}`;
+
+                console.log('[App] Image loaded successfully');
+            } catch (imgErr) {
+                console.error('[App] Error loading scraped image:', imgErr);
+                console.error('[App] Error details:', imgErr.message, imgErr.stack);
+                showToast('Warning: Could not load scraped image', 'error');
+            }
+        }
+
+        // Open manual entry modal with pre-populated data
+        openManualEntryModalWithData(scrapedData);
+
+        showToast('Data scraped successfully!', 'success');
+
+    } catch (err) {
+        console.error('[App] Error scraping URL:', err);
+        showToast(`Error scraping URL: ${err.message}`, 'error');
+    }
+}
+
+function openManualEntryModalWithData(data) {
+    // Store the image data before opening modal (which resets it)
+    const savedImageData = newAnimalImageData;
+
+    openManualEntryModal();
+
+    // Restore the image data that was reset by openManualEntryModal
+    if (savedImageData) {
+        newAnimalImageData = savedImageData;
+    }
+
+    // Populate form fields with scraped data
+    if (data.name) document.getElementById('newName').value = data.name;
+    if (data.breed) document.getElementById('newBreed').value = data.breed;
+    if (data.slug) document.getElementById('newSlug').value = data.slug;
+    if (data.age_long) document.getElementById('newAgeLong').value = data.age_long;
+    if (data.age_short) document.getElementById('newAgeShort').value = data.age_short;
+    if (data.size) document.getElementById('newSize').value = data.size;
+    if (data.gender) document.getElementById('newGender').value = data.gender;
+    if (data.shots !== undefined) document.getElementById('newShots').value = data.shots;
+    if (data.housetrained !== undefined) document.getElementById('newHousetrained').value = data.housetrained;
+    if (data.kids !== undefined) document.getElementById('newKids').value = data.kids;
+    if (data.dogs !== undefined) document.getElementById('newDogs').value = data.dogs;
+    if (data.cats !== undefined) document.getElementById('newCats').value = data.cats;
+
+    // Update image preview if available
+    if (data.imageDataUrl) {
+        const imageContainer = document.querySelector('#manualEntryModal .modal-image-container');
+        let modalImage = document.getElementById('newAnimalImage');
+        const modalNoImage = document.getElementById('newAnimalNoImage');
+
+        if (!modalImage) {
+            modalImage = document.createElement('img');
+            modalImage.id = 'newAnimalImage';
+            modalImage.className = 'modal-image';
+            imageContainer.insertBefore(modalImage, imageContainer.firstChild);
+        }
+
+        modalImage.src = data.imageDataUrl;
+        modalImage.style.display = 'block';
+        modalNoImage.style.display = 'none';
+    }
+}
+
+// Manual Entry Modal functions
+function openManualEntryModal() {
+    newAnimalImageData = null; // Reset image data
+    document.getElementById('manualEntryModal').classList.add('active');
+
+    // Reset form
+    document.getElementById('createForm').reset();
+
+    // Reset image display
+    const modalImage = document.getElementById('newAnimalImage');
+    const modalNoImage = document.getElementById('newAnimalNoImage');
+    if (modalImage) {
+        modalImage.style.display = 'none';
+    }
+    modalNoImage.style.display = 'flex';
+}
+
+function closeManualEntryModal() {
+    document.getElementById('manualEntryModal').classList.remove('active');
+    newAnimalImageData = null;
+}
+
+async function addNewAnimalImage() {
+    console.log('addNewAnimalImage() called');
+
+    try {
+        console.log('Calling Neutralino.os.showOpenDialog...');
+        const result = await Neutralino.os.showOpenDialog('Select Image', {
+            multiSelections: false,
+            filters: [
+                { name: 'Images', extensions: ['jpg', 'jpeg', 'png', 'gif', 'webp'] }
+            ]
+        });
+
+        console.log('Dialog result:', result);
+
+        if (result && result.length > 0) {
+            const filePath = result[0];
+            console.log('Selected file:', filePath);
+            await loadNewAnimalImage(filePath);
+        } else {
+            console.log('No file selected');
+        }
+    } catch (err) {
+        console.error('Error selecting image:', err);
+        showToast('Error selecting image: ' + err.message, 'error');
+    }
+}
+
+async function loadNewAnimalImage(filePath) {
+    try {
+        // Read the file as binary
+        const data = await Neutralino.filesystem.readBinaryFile(filePath);
+
+        // Determine MIME type from extension
+        const ext = filePath.split('.').pop().toLowerCase();
+        const mimeTypes = {
+            'jpg': 'image/jpeg',
+            'jpeg': 'image/jpeg',
+            'png': 'image/png',
+            'gif': 'image/gif',
+            'webp': 'image/webp'
+        };
+        const mime = mimeTypes[ext] || 'image/jpeg';
+
+        // Convert ArrayBuffer to hex string for SQLite
+        const uint8Array = new Uint8Array(data);
+        let hexString = '';
+        for (let i = 0; i < uint8Array.length; i++) {
+            hexString += uint8Array[i].toString(16).padStart(2, '0');
+        }
+
+        // Store new animal image data
+        newAnimalImageData = {
+            hex: hexString,
+            mime: mime,
+            path: filePath.split('/').pop()
+        };
+
+        // Convert to base64 for preview
+        let binary = '';
+        for (let i = 0; i < uint8Array.length; i++) {
+            binary += String.fromCharCode(uint8Array[i]);
+        }
+        const base64 = btoa(binary);
+        const dataUrl = `data:${mime};base64,${base64}`;
+
+        // Update preview - create img element if it doesn't exist
+        const imageContainer = document.querySelector('#manualEntryModal .modal-image-container');
+        let modalImage = document.getElementById('newAnimalImage');
+        const modalNoImage = document.getElementById('newAnimalNoImage');
+
+        if (!modalImage) {
+            modalImage = document.createElement('img');
+            modalImage.id = 'newAnimalImage';
+            modalImage.className = 'modal-image';
+            imageContainer.insertBefore(modalImage, imageContainer.firstChild);
+        }
+
+        modalImage.src = dataUrl;
+        modalImage.style.display = 'block';
+        modalNoImage.style.display = 'none';
+
+        showToast('Image selected. Click Create to save animal.');
+    } catch (err) {
+        console.error('Error loading image:', err);
+        showToast('Error loading image: ' + err.message, 'error');
+    }
+}
+
+async function createAnimal() {
+    const name = escapeSQL(document.getElementById('newName').value);
+    const breed = escapeSQL(document.getElementById('newBreed').value);
+    const slug = escapeSQL(document.getElementById('newSlug').value);
+    const ageLong = escapeSQL(document.getElementById('newAgeLong').value);
+    const ageShort = escapeSQL(document.getElementById('newAgeShort').value);
+    const size = escapeSQL(document.getElementById('newSize').value);
+    const gender = escapeSQL(document.getElementById('newGender').value);
+    const shots = document.getElementById('newShots').value;
+    const housetrained = document.getElementById('newHousetrained').value;
+    const kids = escapeSQL(document.getElementById('newKids').value);
+    const dogs = escapeSQL(document.getElementById('newDogs').value);
+    const cats = escapeSQL(document.getElementById('newCats').value);
+
+    // Build SQL with optional image data
+    let sql;
+    if (newAnimalImageData) {
+        sql = `INSERT INTO animals (
+            name, breed, slug, age_long, age_short, size, gender, shots, housetrained,
+            kids, dogs, cats, portrait_path, portrait_mime, portrait_data
+        ) VALUES (
+            '${name}', '${breed}', '${slug}', '${ageLong}', '${ageShort}',
+            '${size}', '${gender}', ${shots}, ${housetrained},
+            '${kids}', '${dogs}', '${cats}',
+            '${escapeSQL(newAnimalImageData.path)}',
+            '${escapeSQL(newAnimalImageData.mime)}',
+            X'${newAnimalImageData.hex}'
+        );`;
+    } else {
+        sql = `INSERT INTO animals (
+            name, breed, slug, age_long, age_short, size, gender, shots, housetrained,
+            kids, dogs, cats
+        ) VALUES (
+            '${name}', '${breed}', '${slug}', '${ageLong}', '${ageShort}',
+            '${size}', '${gender}', ${shots}, ${housetrained},
+            '${kids}', '${dogs}', '${cats}'
+        );`;
+    }
+
+    try {
+        console.log('[App] Creating animal with image data:', newAnimalImageData ? 'Yes' : 'No');
+        if (newAnimalImageData) {
+            console.log('[App] Image data size:', newAnimalImageData.hex.length / 2, 'bytes');
+        }
+        await runSQL(sql);
+        showToast(`${document.getElementById('newName').value} created successfully!`);
+        closeManualEntryModal();
+        await loadAnimals();
+    } catch (err) {
+        console.error('[App] Error creating animal:', err);
+        console.error('[App] SQL length:', sql.length);
+        showToast(`Error creating animal: ${err.message}`, 'error');
     }
 }
 
@@ -245,19 +606,29 @@ function closeModal() {
 async function changeImage() {
     if (!currentAnimal) return;
 
+    console.log('changeImage() called');
+
     try {
+        console.log('Calling Neutralino.os.showOpenDialog...');
         const result = await Neutralino.os.showOpenDialog('Select Image', {
+            multiSelections: false,
             filters: [
                 { name: 'Images', extensions: ['jpg', 'jpeg', 'png', 'gif', 'webp'] }
             ]
         });
 
+        console.log('Dialog result:', result);
+
         if (result && result.length > 0) {
             const filePath = result[0];
+            console.log('Selected file:', filePath);
             await loadNewImage(filePath);
+        } else {
+            console.log('No file selected');
         }
     } catch (err) {
         console.error('Error selecting image:', err);
+        console.error('Error details:', JSON.stringify(err));
         showToast('Error selecting image: ' + err.message, 'error');
     }
 }
@@ -402,15 +773,51 @@ async function deleteAnimal() {
 document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
         closeModal();
+        closeCreateModal();
+        closeManualEntryModal();
+        closeScrapeModal();
     }
 });
 
 // Close modal when clicking outside
+document.getElementById('createModal').addEventListener('click', (e) => {
+    if (e.target.classList.contains('modal-overlay')) {
+        closeCreateModal();
+    }
+});
+
+document.getElementById('manualEntryModal').addEventListener('click', (e) => {
+    if (e.target.classList.contains('modal-overlay')) {
+        closeManualEntryModal();
+    }
+});
+
 document.getElementById('editModal').addEventListener('click', (e) => {
     if (e.target.classList.contains('modal-overlay')) {
         closeModal();
     }
 });
+
+document.getElementById('scrapeModal').addEventListener('click', (e) => {
+    if (e.target.classList.contains('modal-overlay')) {
+        closeScrapeModal();
+    }
+});
+
+// Note: Click handlers for image containers are now inline in HTML
+// Keeping stopPropagation functionality by wrapping the functions
+
+const originalChangeImage = changeImage;
+window.changeImage = function(e) {
+    if (e && e.stopPropagation) e.stopPropagation();
+    originalChangeImage();
+};
+
+const originalAddNewAnimalImage = addNewAnimalImage;
+window.addNewAnimalImage = function(e) {
+    if (e && e.stopPropagation) e.stopPropagation();
+    originalAddNewAnimalImage();
+};
 
 // Initialize app
 Neutralino.init();
@@ -423,3 +830,279 @@ Neutralino.events.on('ready', async () => {
 Neutralino.events.on('windowClose', () => {
     Neutralino.app.exit();
 });
+
+// Generate cards function
+async function generateCards(animalId) {
+    const animal = animals.find(a => a.id === animalId);
+    if (!animal) {
+        showToast('Animal not found', 'error');
+        return;
+    }
+
+    try {
+        showToast(`Generating cards for ${animal.name}...`);
+        console.log('[App] Starting card generation (front and back) for animal:', animal.name);
+
+        // Generate front card first
+        await printCardFront(animalId);
+
+        // Then generate back card
+        await printCardBack(animalId);
+
+        showToast(`Cards generated for ${animal.name}!`);
+    } catch (err) {
+        console.error('[App] Error generating cards:', err);
+        showToast(`Error generating cards: ${err.message}`, 'error');
+    }
+}
+
+// Print card functions
+async function printCardFront(animalId) {
+    const animal = animals.find(a => a.id === animalId);
+    if (!animal) {
+        showToast('Animal not found', 'error');
+        return;
+    }
+
+    let tempImagePath = null;
+
+    try {
+        showToast(`Generating card front for ${animal.name}...`);
+        console.log('[App] Starting card generation for animal:', animal.name);
+
+        // Write portrait data to temporary file if available
+        let portraitFilePath = null;
+        if (animal.imageDataUrl) {
+            // Extract base64 data from data URL
+            const base64Match = animal.imageDataUrl.match(/base64,(.+)/);
+            if (base64Match) {
+                const portraitData = base64Match[1];
+                console.log('[App] Portrait data extracted, length:', portraitData.length);
+
+                // Write to temporary file
+                tempImagePath = `./.tmp/portrait-${animal.id}-${Date.now()}.jpg`;
+                console.log('[App] Writing portrait to temp file:', tempImagePath);
+
+                // Convert base64 to binary buffer
+                const binaryString = atob(portraitData);
+                const bytes = new Uint8Array(binaryString.length);
+                for (let i = 0; i < binaryString.length; i++) {
+                    bytes[i] = binaryString.charCodeAt(i);
+                }
+
+                await Neutralino.filesystem.writeBinaryFile(tempImagePath, bytes);
+                console.log('[App] Portrait written to temp file');
+                portraitFilePath = tempImagePath;
+            } else {
+                console.log('[App] No base64 match in imageDataUrl');
+            }
+        } else {
+            console.log('[App] No imageDataUrl available');
+        }
+
+        // Prepare parameters for card generation
+        const params = {
+            name: animal.name,
+            breed: animal.breed,
+            ageShort: animal.age_short,
+            ageLong: animal.age_long,
+            size: animal.size,
+            gender: animal.gender,
+            shots: animal.shots,
+            housetrained: animal.housetrained,
+            kids: animal.kids,
+            dogs: animal.dogs,
+            cats: animal.cats,
+            slug: animal.slug,
+            portraitPath: animal.portrait_path || 'portrait.jpg',
+            portraitFilePath: portraitFilePath
+        };
+
+        console.log('[App] Parameters prepared:', JSON.stringify({...params}));
+
+        // Call the card generation script
+        const jsonParams = JSON.stringify(params);
+        const command = `node generate-card-cli.js '${jsonParams.replace(/'/g, "\\'")}' `;
+        console.log('[App] Executing command:', command.substring(0, 200) + '...');
+
+        const result = await Neutralino.os.execCommand(command, { cwd: NL_PATH });
+
+        console.log('[App] Command exit code:', result.exitCode);
+
+        // Log stderr (debug messages)
+        if (result.stdErr) {
+            const lines = result.stdErr.split('\n');
+            for (const line of lines) {
+                if (line.trim()) {
+                    console.log('[CardGen Debug]', line);
+                }
+            }
+        }
+
+        if (result.exitCode !== 0) {
+            throw new Error(result.stdErr || 'Card generation failed');
+        }
+
+        // The output path is in stdout
+        const outputPath = result.stdOut.trim();
+        console.log('[App] Card generated at:', outputPath);
+
+        // Clean up temporary file
+        if (tempImagePath) {
+            try {
+                await Neutralino.os.execCommand(`rm "${tempImagePath}"`, { cwd: NL_PATH });
+                console.log('[App] Cleaned up temp file:', tempImagePath);
+            } catch (cleanupErr) {
+                console.error('[App] Error cleaning up temp file:', cleanupErr);
+            }
+        }
+
+        // Open in GIMP (don't wait for it to exit)
+        console.log('[App] Opening GIMP...');
+        Neutralino.os.execCommand(`gimp "${outputPath}" &`, { cwd: NL_PATH }).catch(err => {
+            console.error('[App] Error launching GIMP:', err);
+        });
+        console.log('[App] GIMP launched');
+
+        showToast(`Card front generated for ${animal.name}!`);
+    } catch (err) {
+        console.error('[App] Error printing card front:', err);
+        console.error('[App] Error stack:', err.stack);
+        showToast(`Error generating card: ${err.message}`, 'error');
+
+        // Clean up temporary file on error
+        if (tempImagePath) {
+            try {
+                await Neutralino.os.execCommand(`rm "${tempImagePath}"`, { cwd: NL_PATH });
+                console.log('[App] Cleaned up temp file after error:', tempImagePath);
+            } catch (cleanupErr) {
+                console.error('[App] Error cleaning up temp file after error:', cleanupErr);
+            }
+        }
+    }
+}
+
+async function printCardBack(animalId) {
+    const animal = animals.find(a => a.id === animalId);
+    if (!animal) {
+        showToast('Animal not found', 'error');
+        return;
+    }
+
+    let tempImagePath = null;
+
+    try {
+        showToast(`Generating card back for ${animal.name}...`);
+        console.log('[App] Starting card back generation for animal:', animal.name);
+
+        // Write portrait data to temporary file if available
+        let portraitFilePath = null;
+        if (animal.imageDataUrl) {
+            // Extract base64 data from data URL
+            const base64Match = animal.imageDataUrl.match(/base64,(.+)/);
+            if (base64Match) {
+                const portraitData = base64Match[1];
+                console.log('[App] Portrait data extracted, length:', portraitData.length);
+
+                // Write to temporary file
+                tempImagePath = `./.tmp/portrait-${animal.id}-${Date.now()}.jpg`;
+                console.log('[App] Writing portrait to temp file:', tempImagePath);
+
+                // Convert base64 to binary buffer
+                const binaryString = atob(portraitData);
+                const bytes = new Uint8Array(binaryString.length);
+                for (let i = 0; i < binaryString.length; i++) {
+                    bytes[i] = binaryString.charCodeAt(i);
+                }
+
+                await Neutralino.filesystem.writeBinaryFile(tempImagePath, bytes);
+                console.log('[App] Portrait written to temp file');
+                portraitFilePath = tempImagePath;
+            } else {
+                console.log('[App] No base64 match in imageDataUrl');
+            }
+        } else {
+            console.log('[App] No imageDataUrl available');
+        }
+
+        // Prepare parameters for card generation
+        const params = {
+            name: animal.name,
+            breed: animal.breed,
+            ageShort: animal.age_short,
+            ageLong: animal.age_long,
+            size: animal.size,
+            gender: animal.gender,
+            shots: animal.shots,
+            housetrained: animal.housetrained,
+            kids: animal.kids,
+            dogs: animal.dogs,
+            cats: animal.cats,
+            slug: animal.slug,
+            portraitPath: animal.portrait_path || 'portrait.jpg',
+            portraitFilePath: portraitFilePath
+        };
+
+        console.log('[App] Parameters prepared:', JSON.stringify({...params}));
+
+        // Call the card generation script with 'back' parameter
+        const jsonParams = JSON.stringify(params);
+        const command = `node generate-card-cli.js '${jsonParams.replace(/'/g, "\\'")}' back`;
+        console.log('[App] Executing command:', command.substring(0, 200) + '...');
+
+        const result = await Neutralino.os.execCommand(command, { cwd: NL_PATH });
+
+        console.log('[App] Command exit code:', result.exitCode);
+
+        // Log stderr (debug messages)
+        if (result.stdErr) {
+            const lines = result.stdErr.split('\n');
+            for (const line of lines) {
+                if (line.trim()) {
+                    console.log('[CardGen Debug]', line);
+                }
+            }
+        }
+
+        if (result.exitCode !== 0) {
+            throw new Error(result.stdErr || 'Card generation failed');
+        }
+
+        // The output path is in stdout
+        const outputPath = result.stdOut.trim();
+        console.log('[App] Card generated at:', outputPath);
+
+        // Clean up temporary file
+        if (tempImagePath) {
+            try {
+                await Neutralino.os.execCommand(`rm "${tempImagePath}"`, { cwd: NL_PATH });
+                console.log('[App] Cleaned up temp file:', tempImagePath);
+            } catch (cleanupErr) {
+                console.error('[App] Error cleaning up temp file:', cleanupErr);
+            }
+        }
+
+        // Open in GIMP (don't wait for it to exit)
+        console.log('[App] Opening GIMP...');
+        Neutralino.os.execCommand(`gimp "${outputPath}" &`, { cwd: NL_PATH }).catch(err => {
+            console.error('[App] Error launching GIMP:', err);
+        });
+        console.log('[App] GIMP launched');
+
+        showToast(`Card back generated for ${animal.name}!`);
+    } catch (err) {
+        console.error('[App] Error printing card back:', err);
+        console.error('[App] Error stack:', err.stack);
+        showToast(`Error generating card: ${err.message}`, 'error');
+
+        // Clean up temporary file on error
+        if (tempImagePath) {
+            try {
+                await Neutralino.os.execCommand(`rm "${tempImagePath}"`, { cwd: NL_PATH });
+                console.log('[App] Cleaned up temp file after error:', tempImagePath);
+            } catch (cleanupErr) {
+                console.error('[App] Error cleaning up temp file after error:', cleanupErr);
+            }
+        }
+    }
+}
