@@ -143,6 +143,7 @@ async function capture(page, outputPath) {
     const bounding_box = await div.boundingBox();
     console.error('[Card Gen] Bounding box:', bounding_box);
 
+    // Use PNG for better DPI metadata preservation
     await page.screenshot({
         path: outputPath,
         clip: {
@@ -151,8 +152,7 @@ async function capture(page, outputPath) {
             width: bounding_box.width,
             height: bounding_box.height
         },
-        type: 'jpeg',
-        quality: 80
+        type: 'png'
     });
     console.error('[Card Gen] Screenshot captured to:', outputPath);
 }
@@ -189,7 +189,7 @@ async function generateCardFront(params) {
     console.error('[Card Gen] Creating output directory:', outputDir);
     await fs.mkdir(outputDir, { recursive: true });
 
-    const outputPath = path.join(outputDir, `${params.name}-card-front.jpg`);
+    const outputPath = path.join(outputDir, `${params.name}-card-front.png`);
     console.error('[Card Gen] Output path:', outputPath);
     await capture(page, outputPath);
 
@@ -234,7 +234,7 @@ async function generateCardBack(params) {
     console.error('[Card Gen] Creating output directory:', outputDir);
     await fs.mkdir(outputDir, { recursive: true });
 
-    const outputPath = path.join(outputDir, `${params.name}-card-back.jpg`);
+    const outputPath = path.join(outputDir, `${params.name}-card-back.png`);
     console.error('[Card Gen] Output path:', outputPath);
     await capture(page, outputPath);
 
