@@ -2,13 +2,19 @@
   "name": "foster-card-generator",
   "version": "1.0.0",
   "scripts": {
-    "generate-cards": "mkdir -p output && node src/generate-cards.js"
+    "generate-cards": "mkdir -p output && node src/generate-cards.js",
+    "db:migrate": "node db/migrate.js",
+    "db:reset": "node db/migrate.js --reset",
+    "db:query": "sqlite3 db/animals.db",
+    "app:run": "cd app && npx @neutralinojs/neu run",
+    "app:build": "cd app && npx @neutralinojs/neu build"
   },
   "author": "",
   "license": "ISC",
   "description": "",
   "dependencies": {
     "handlebars": "^4.7.8",
+    "js-yaml": "^4.1.0",
     "puppeteer": "^24.1.1",
     "qrcode": "^1.5.4",
     "rimraf": "^6.0.1",

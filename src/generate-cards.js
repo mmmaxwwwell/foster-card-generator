@@ -1,7 +1,7 @@
 const puppeteer = require('puppeteer');
 const tmp = require('tmp');
 const fs = require('fs').promises;
-const rimraf = require('rimraf');
+const { rimraf } = require('rimraf');
 const path = require('path');
 const yaml = require('js-yaml');
 const fsSync = require('fs');
@@ -25,7 +25,7 @@ async function createTempDir(params) {
                     )
                 )
                 .then(() => {
-                    resolve({ tmpPath: tmpPath, cleanup: () => new Promise(res => rimraf(tmpPath, res)) });
+                    resolve({ tmpPath: tmpPath, cleanup: async () => await rimraf(tmpPath) });
                 })
                 .catch(err => reject(err));
             }
@@ -118,7 +118,7 @@ async function generateCard(params) {
 
     await browser.close();
 
-    // await cleanup();
+    await cleanup();
 }
 
 (async () => {

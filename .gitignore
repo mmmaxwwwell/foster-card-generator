@@ -1,1 +1,6 @@
 node_modules/
+output/
+src/images/
+src/dogs.d.old/
+db/*.db
+app/bin
