@@ -1,6 +1,10 @@
 const puppeteer = require('puppeteer');
 const fs = require('fs').promises;
 const path = require('path');
+const os = require('os');
+
+// Get the tmp directory in user's data folder
+const TMP_DIR = path.join(os.homedir(), '.local', 'share', 'foster-card-generator', 'tmp');
 
 /**
  * Scrapes an animal adoption page and extracts relevant information
@@ -296,8 +300,8 @@ async function scrapeAnimalPage(url) {
 
                 // Save to temporary location
                 const timestamp = Date.now();
-                imagePath = path.join('./.tmp', `scraped-${timestamp}.${ext}`);
-                await fs.mkdir('./.tmp', { recursive: true });
+                imagePath = path.join(TMP_DIR, `scraped-${timestamp}.${ext}`);
+                await fs.mkdir(TMP_DIR, { recursive: true });
                 await fs.writeFile(imagePath, imageBuffer);
                 console.error('[Scraper] Image saved to:', imagePath);
                 console.error('[Scraper] Image size:', imageBuffer.length, 'bytes');

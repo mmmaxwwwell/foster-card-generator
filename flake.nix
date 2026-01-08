@@ -110,9 +110,29 @@
             chmod +x $out/lib/foster-card-generator/app/bin/neutralino-linux_armhf
             chmod +x $out/lib/foster-card-generator/app/generate-card-cli.js
 
-            # Create wrapper to run Neutralino
-            makeWrapper $out/lib/foster-card-generator/app/bin/neutralino-linux_x64 $out/bin/foster-card-generator \
-              --chdir "$out/lib/foster-card-generator/app" \
+            # Create launcher script that sets up writable directories first
+            cat > $out/bin/foster-card-generator <<'LAUNCHER'
+            #!/usr/bin/env bash
+            # Create writable data directory for Neutralino
+            DATA_DIR="$HOME/.local/share/foster-card-generator"
+            mkdir -p "$DATA_DIR/tmp"
+            mkdir -p "$DATA_DIR"
+
+            # Create .tmp symlink in the app directory if running from Nix store
+            APP_DIR="@out@/lib/foster-card-generator/app"
+
+            # Change to the data directory so Neutralino creates .tmp there
+            cd "$DATA_DIR"
+
+            # Run Neutralino with the app path
+            exec "@out@/lib/foster-card-generator/app/bin/neutralino-linux_x64" --path="$APP_DIR" "$@"
+            LAUNCHER
+            chmod +x $out/bin/foster-card-generator
+            substituteInPlace $out/bin/foster-card-generator --replace "@out@" "$out"
+
+            # Set up environment via a wrapper around our launcher
+            mv $out/bin/foster-card-generator $out/bin/.foster-card-generator-unwrapped
+            makeWrapper $out/bin/.foster-card-generator-unwrapped $out/bin/foster-card-generator \
               --set PUPPETEER_EXECUTABLE_PATH "${pkgs.chromium}/bin/chromium" \
               --set PUPPETEER_SKIP_DOWNLOAD "1" \
               --prefix PATH : ${pkgs.lib.makeBinPath [ pkgs.chromium pkgs.nodejs_22 pkgs.sqlite ]} \

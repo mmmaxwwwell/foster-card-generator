@@ -663,15 +663,31 @@
             Loading animals...
         </div>
 
-        <footer id="app-footer" style="text-align: center; padding: 20px; color: white; font-size: 13px; background: rgba(0,0,0,0.2); border-radius: 8px; margin-top: 20px;">
-            <div id="log-path" style="line-height: 1.8;">
-                <strong>Debug Information</strong><br>
-                Initializing...
-            </div>
-            <button onclick="openLogFile()" style="margin-top: 10px; padding: 8px 16px; background: white; color: #667eea; border: none; border-radius: 6px; cursor: pointer; font-weight: 600;">
-                Open Log File
+        <footer id="app-footer" style="text-align: center; padding: 20px; margin-top: 20px;">
+            <button onclick="openDebugModal()" style="padding: 8px 16px; background: rgba(0,0,0,0.2); color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: 600;">
+                Debug
             </button>
         </footer>
+    </div>
+
+    <!-- Debug Modal -->
+    <div id="debugModal" class="modal-overlay">
+        <div class="modal" style="max-width: 500px;">
+            <div class="modal-header">
+                <h2>Debug Information</h2>
+                <button class="modal-close" onclick="closeDebugModal()">&times;</button>
+            </div>
+            <div class="modal-body" style="padding: 20px;">
+                <div id="log-path" style="line-height: 1.8; font-size: 13px; color: #333;">
+                    Initializing...
+                </div>
+                <div style="margin-top: 20px; text-align: center;">
+                    <button onclick="openLogFile()" style="padding: 8px 16px; background: #667eea; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: 600;">
+                        Open Log File
+                    </button>
+                </div>
+            </div>
+        </div>
     </div>
 
     <!-- Create Animal Modal -->
