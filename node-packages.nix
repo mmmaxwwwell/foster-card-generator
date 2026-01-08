@@ -7165,6 +7165,7 @@ let
     production = true;
     bypassCache = true;
     reconstructLock = true;
+    PUPPETEER_SKIP_DOWNLOAD = "1";
   };
 in
 {

@@ -13,7 +13,7 @@
           inherit system;
         };
 
-        # Import node2nix generated packages
+        # Import node2nix generated packages with PUPPETEER_SKIP_DOWNLOAD
         nodeEnv = import ./node-env.nix {
           inherit (pkgs) stdenv lib python2 runCommand writeTextFile writeShellScript;
           inherit pkgs;
@@ -24,6 +24,7 @@
         node2nixPkgs = import ./node-packages.nix {
           inherit (pkgs) fetchurl nix-gitignore stdenv lib fetchgit;
           inherit nodeEnv;
+          globalBuildInputs = [];
         };
 
         # Libraries needed for Neutralino
@@ -54,6 +55,9 @@
 
           src = ./.;
 
+          # Set PUPPETEER_SKIP_DOWNLOAD for the build
+          PUPPETEER_SKIP_DOWNLOAD = "1";
+
           nativeBuildInputs = with pkgs; [
             makeWrapper
             nodejs_22
@@ -66,8 +70,8 @@
           ];
 
           buildPhase = ''
-            # Link node_modules from node2nix
-            ln -sf ${node2nixPkgs.nodeDependencies}/lib/node_modules/foster-card-generator/node_modules node_modules
+            # Copy node_modules from node2nix (not link, to avoid broken symlink check)
+            cp -rL ${node2nixPkgs.nodeDependencies}/lib/node_modules node_modules
           '';
 
           installPhase = ''
@@ -80,8 +84,8 @@
             cp -r db $out/lib/foster-card-generator/ || true
             cp package.json $out/lib/foster-card-generator/
 
-            # Link node_modules
-            ln -sf ${node2nixPkgs.nodeDependencies}/lib/node_modules/foster-card-generator/node_modules $out/lib/foster-card-generator/node_modules
+            # Copy node_modules
+            cp -r node_modules $out/lib/foster-card-generator/
 
             # Create wrapper for the CLI tool
             makeWrapper ${pkgs.nodejs_22}/bin/node $out/bin/foster-card-generator \
