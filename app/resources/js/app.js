@@ -1,5 +1,39 @@
-// Database path relative to app location
-const DB_PATH = '../db/animals.db';
+// Database path - use environment variable or relative path
+// The Nix wrapper will set FOSTER_DB_DIR to ~/.local/share/foster-card-generator
+let DB_DIR = '../db';
+let DB_PATH = '../db/animals.db';
+
+// Get DB path from environment or use default
+async function getDbPathFromEnv() {
+    try {
+        // Get home directory path for user data
+        const homeResult = await Neutralino.os.execCommand('echo "$HOME/.local/share/foster-card-generator"', { cwd: NL_PATH });
+        if (homeResult.exitCode === 0) {
+            const homeDbDir = homeResult.stdOut.trim();
+            console.log('[App] Home data directory would be:', homeDbDir);
+
+            // Try to create a test file in ../db to check if it's writable
+            const testFile = '../db/.write-test';
+            try {
+                await Neutralino.filesystem.writeFile(testFile, 'test');
+                await Neutralino.filesystem.removeFile(testFile);
+                console.log('[App] ../db is writable, using development mode');
+            } catch (writeErr) {
+                // Can't write to ../db, so use user data directory
+                console.log('[App] ../db is not writable, using user data directory');
+                DB_DIR = homeDbDir;
+                DB_PATH = `${homeDbDir}/animals.db`;
+                // Ensure directory exists
+                await Neutralino.os.execCommand(`mkdir -p "${DB_DIR}"`, { cwd: NL_PATH });
+                console.log('[App] Created user data directory:', DB_DIR);
+            }
+        }
+    } catch (err) {
+        console.error('[App] Error detecting DB path:', err);
+        console.log('[App] Using default DB path (development mode)');
+    }
+    console.log('[App] Final database path:', DB_PATH);
+}
 
 let animals = [];
 let currentAnimal = null;
@@ -1542,6 +1576,9 @@ Neutralino.init();
 
 Neutralino.events.on('ready', async () => {
     console.log('Neutralino app ready');
+
+    // Initialize database path first
+    await getDbPathFromEnv();
 
     // Initialize database if needed
     try {
