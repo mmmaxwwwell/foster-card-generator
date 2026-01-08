@@ -7,3 +7,4 @@ example page/
 .tmp/
 result
 .env
+app/neutralinojs.log
