@@ -1,7 +1,7 @@
 node_modules/
 output/
 db/*.db
-app/bin
+app/bin/*.log
 app/.tmp
 example page/
 .tmp/

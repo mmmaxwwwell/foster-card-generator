@@ -27,7 +27,7 @@
           globalBuildInputs = [];
         };
 
-        # Libraries needed for Neutralino
+        # Libraries needed for Neutralino and Chromium
         neutralinoLibs = with pkgs; [
           gtk3
           glib
@@ -39,6 +39,16 @@
           libpng
           stdenv.cc.cc.lib
           webkitgtk_4_1
+          nss
+          nspr
+          dbus
+          cups
+          libdrm
+          mesa
+          expat
+          alsa-lib
+          at-spi2-atk
+          at-spi2-core
         ];
 
         # Wrapped script to run Neutralino with proper library paths
@@ -77,6 +87,8 @@
           installPhase = ''
             mkdir -p $out/lib/foster-card-generator
             mkdir -p $out/bin
+            mkdir -p $out/share/applications
+            mkdir -p $out/share/icons/hicolor/256x256/apps
 
             # Copy the application
             cp -r app $out/lib/foster-card-generator/
@@ -87,16 +99,37 @@
             # Copy node_modules
             cp -r node_modules $out/lib/foster-card-generator/
 
-            # Create wrapper for the CLI tool
-            makeWrapper ${pkgs.nodejs_22}/bin/node $out/bin/foster-card-generator \
-              --add-flags "$out/lib/foster-card-generator/app/generate-card-cli.js" \
+            # Copy icon
+            cp src/logo.png $out/share/icons/hicolor/256x256/apps/foster-card-generator.png
+            mkdir -p $out/lib/foster-card-generator/app/resources/icons
+            cp src/logo.png $out/lib/foster-card-generator/app/resources/icons/appIcon.png
+
+            # Make binaries executable first
+            chmod +x $out/lib/foster-card-generator/app/bin/neutralino-linux_x64
+            chmod +x $out/lib/foster-card-generator/app/bin/neutralino-linux_arm64
+            chmod +x $out/lib/foster-card-generator/app/bin/neutralino-linux_armhf
+            chmod +x $out/lib/foster-card-generator/app/generate-card-cli.js
+
+            # Create wrapper to run Neutralino
+            makeWrapper $out/lib/foster-card-generator/app/bin/neutralino-linux_x64 $out/bin/foster-card-generator \
+              --chdir "$out/lib/foster-card-generator/app" \
               --set PUPPETEER_EXECUTABLE_PATH "${pkgs.chromium}/bin/chromium" \
               --set PUPPETEER_SKIP_DOWNLOAD "1" \
-              --prefix PATH : ${pkgs.lib.makeBinPath [ pkgs.chromium ]} \
-              --prefix NODE_PATH : "$out/lib/foster-card-generator/node_modules"
+              --prefix PATH : ${pkgs.lib.makeBinPath [ pkgs.chromium pkgs.nodejs_22 ]} \
+              --prefix NODE_PATH : "$out/lib/foster-card-generator/node_modules" \
+              --prefix LD_LIBRARY_PATH : "${pkgs.lib.makeLibraryPath neutralinoLibs}"
 
-            # Make the CLI executable
-            chmod +x $out/lib/foster-card-generator/app/generate-card-cli.js
+            # Create desktop entry
+            cat > $out/share/applications/foster-card-generator.desktop <<EOF
+            [Desktop Entry]
+            Type=Application
+            Name=Foster Card Generator
+            Comment=Generate printable cards for foster animals
+            Exec=$out/bin/foster-card-generator
+            Icon=foster-card-generator
+            Terminal=false
+            Categories=Utility;Graphics;
+            EOF
           '';
 
           meta = with pkgs.lib; {

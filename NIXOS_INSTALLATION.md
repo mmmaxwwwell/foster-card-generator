@@ -73,13 +73,25 @@ nix run
 
 ## Usage
 
-After installation, the `foster-card-generator` command will be available:
+After installation, Foster Card Generator will be available:
+
+### Desktop Application
+
+The app appears in your application launcher (dmenu, rofi, etc.) as "Foster Card Generator" with an icon. Simply launch it from your app menu or run:
 
 ```bash
-foster-card-generator '<json-params>'
+foster-card-generator
 ```
 
-The command expects JSON parameters for generating foster animal cards.
+This starts the Neutralino desktop application for generating foster animal cards.
+
+### Command Line (Advanced)
+
+For CLI usage of the card generator, you can run:
+
+```bash
+node /path/to/foster-card-generator/app/generate-card-cli.js '<json-params>'
+```
 
 ## Development
 
