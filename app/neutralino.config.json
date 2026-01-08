@@ -9,6 +9,7 @@
   "enableServer": true,
   "enableNativeAPI": true,
   "tokenSecurity": "one-time",
+  "dataLocation": "system",
   "logging": {
     "enabled": false,
     "writeToLogFile": false

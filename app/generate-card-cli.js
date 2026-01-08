@@ -184,8 +184,9 @@ async function generateCardFront(params) {
     await page.goto(htmlPath, { waitUntil: 'networkidle0' });
     console.error('[Card Gen] Page loaded');
 
-    // Ensure output directory exists
-    const outputDir = path.join(__dirname, '..', 'output');
+    // Ensure output directory exists - use user's data directory
+    const homeDir = process.env.HOME || require('os').homedir();
+    const outputDir = path.join(homeDir, '.local', 'share', 'foster-card-generator', 'output');
     console.error('[Card Gen] Creating output directory:', outputDir);
     await fs.mkdir(outputDir, { recursive: true });
 
@@ -229,8 +230,9 @@ async function generateCardBack(params) {
     await page.goto(htmlPath, { waitUntil: 'networkidle0' });
     console.error('[Card Gen] Page loaded');
 
-    // Ensure output directory exists
-    const outputDir = path.join(__dirname, '..', 'output');
+    // Ensure output directory exists - use user's data directory
+    const homeDir = process.env.HOME || require('os').homedir();
+    const outputDir = path.join(homeDir, '.local', 'share', 'foster-card-generator', 'output');
     console.error('[Card Gen] Creating output directory:', outputDir);
     await fs.mkdir(outputDir, { recursive: true });
 

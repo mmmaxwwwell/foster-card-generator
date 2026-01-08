@@ -76,6 +76,7 @@
           buildInputs = with pkgs; [
             chromium
             sqlite
+            gimp
             node2nixPkgs.nodeDependencies
           ];
 
@@ -104,28 +105,23 @@
             mkdir -p $out/lib/foster-card-generator/app/resources/icons
             cp src/logo.png $out/lib/foster-card-generator/app/resources/icons/appIcon.png
 
+            # Copy resources.neu from dist (pre-built by neu build)
+            cp app/dist/foster-app/resources.neu $out/lib/foster-card-generator/app/
+
             # Make binaries executable first
             chmod +x $out/lib/foster-card-generator/app/bin/neutralino-linux_x64
             chmod +x $out/lib/foster-card-generator/app/bin/neutralino-linux_arm64
             chmod +x $out/lib/foster-card-generator/app/bin/neutralino-linux_armhf
             chmod +x $out/lib/foster-card-generator/app/generate-card-cli.js
 
-            # Create launcher script that sets up writable directories first
+            # Create launcher script
             cat > $out/bin/foster-card-generator <<'LAUNCHER'
             #!/usr/bin/env bash
-            # Create writable data directory for Neutralino
-            DATA_DIR="$HOME/.local/share/foster-card-generator"
-            mkdir -p "$DATA_DIR/tmp"
-            mkdir -p "$DATA_DIR"
-
-            # Create .tmp symlink in the app directory if running from Nix store
-            APP_DIR="@out@/lib/foster-card-generator/app"
-
-            # Change to the data directory so Neutralino creates .tmp there
-            cd "$DATA_DIR"
+            # Create data directory for app output
+            mkdir -p "$HOME/.local/share/foster-card-generator/output"
 
             # Run Neutralino with the app path
-            exec "@out@/lib/foster-card-generator/app/bin/neutralino-linux_x64" --path="$APP_DIR" "$@"
+            exec "@out@/lib/foster-card-generator/app/bin/neutralino-linux_x64" --path="@out@/lib/foster-card-generator/app" "$@"
             LAUNCHER
             chmod +x $out/bin/foster-card-generator
             substituteInPlace $out/bin/foster-card-generator --replace "@out@" "$out"
@@ -135,7 +131,7 @@
             makeWrapper $out/bin/.foster-card-generator-unwrapped $out/bin/foster-card-generator \
               --set PUPPETEER_EXECUTABLE_PATH "${pkgs.chromium}/bin/chromium" \
               --set PUPPETEER_SKIP_DOWNLOAD "1" \
-              --prefix PATH : ${pkgs.lib.makeBinPath [ pkgs.chromium pkgs.nodejs_22 pkgs.sqlite ]} \
+              --prefix PATH : ${pkgs.lib.makeBinPath [ pkgs.chromium pkgs.nodejs_22 pkgs.sqlite pkgs.gimp ]} \
               --prefix NODE_PATH : "$out/lib/foster-card-generator/node_modules" \
               --prefix LD_LIBRARY_PATH : "${pkgs.lib.makeLibraryPath neutralinoLibs}"
 
