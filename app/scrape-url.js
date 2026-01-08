@@ -71,9 +71,34 @@ async function scrapeAnimalPage(url) {
             // Extract age
             const ageText = getTableValue('Age');
             if (ageText) {
-                result.age_long = ageText;
+                // First, remove zero-value units
+                let cleanedAge = ageText
+                    .replace(/,?\s*0\s+(years?|months?|weeks?|days?)/gi, '')
+                    .trim();
+
+                // Check if there's a year component
+                const hasYear = /\d+\s*years?/i.test(cleanedAge);
+                // Check if there's a month component
+                const hasMonth = /\d+\s*months?/i.test(cleanedAge);
+
+                if (hasYear) {
+                    // If there's a year, keep only the year part
+                    // Remove everything after the year (months, weeks, days, and connecting words)
+                    cleanedAge = cleanedAge
+                        .replace(/(\d+\s+years?).*$/i, '$1')
+                        .trim();
+                } else if (hasMonth) {
+                    // If there's a month (but no year), keep only the month part
+                    // Remove everything after the month (weeks, days, and connecting words)
+                    cleanedAge = cleanedAge
+                        .replace(/(\d+\s+months?).*$/i, '$1')
+                        .trim();
+                }
+                // If only weeks or days, keep them as-is
+
+                result.age_long = cleanedAge;
                 // Parse age for short form
-                const ageMatch = ageText.match(/(\d+)\s*(year|month|week)/i);
+                const ageMatch = cleanedAge.match(/(\d+)\s*(year|month|week)/i);
                 if (ageMatch) {
                     const num = ageMatch[1];
                     const unit = ageMatch[2].toLowerCase();
@@ -143,23 +168,65 @@ async function scrapeAnimalPage(url) {
             }
 
             // Extract breed from the page
-            const petInfoBasic = document.querySelector('.pet-info .basic');
-            if (petInfoBasic) {
-                const basicText = petInfoBasic.textContent.trim();
-                // Parse format like "Male Boxer Terriers (Medium) Young"
-                // Remove gender, size, and age indicators
-                let breed = basicText
-                    .replace(/^(Male|Female|Neutered|Spayed)\s*/i, '')
-                    .replace(/\s*(Male|Female)\s*/i, '')
-                    .replace(/\s*\([^)]*\)\s*/g, '') // Remove parentheses content
-                    .replace(/\s*(Young|Adult|Senior|Puppy|Kitten|Baby)\s*$/i, '')
-                    .trim();
+            // Method 1: Look for h2 with pet-breed class (most reliable)
+            const petBreedElement = document.querySelector('h2.pet-breed');
+            if (petBreedElement) {
+                result.breed = petBreedElement.textContent.trim();
+            }
 
-                if (breed) result.breed = breed;
+            // Method 2: Look for breed in table
+            if (!result.breed) {
+                const breedFromTable = getTableValue('Breed');
+                if (breedFromTable) {
+                    result.breed = breedFromTable;
+                }
+            }
+
+            // Method 3: Try pet-info basic text or just .basic
+            if (!result.breed) {
+                const petInfoBasic = document.querySelector('.pet-info .basic') || document.querySelector('.basic');
+                if (petInfoBasic) {
+                    const basicText = petInfoBasic.textContent.trim();
+                    // Parse format like "Male Maltese  Young" or "Male Boxer Terriers (Medium) Young"
+                    // Remove gender, size, and age indicators
+                    let breed = basicText
+                        .replace(/^(Male|Female|Neutered|Spayed)\s+/i, '')
+                        .replace(/\s+(Male|Female)\s+/i, ' ')
+                        .replace(/\s*\([^)]*\)\s*/g, ' ') // Remove parentheses content
+                        .replace(/\s+(Young|Adult|Senior|Puppy|Kitten|Baby)\s*$/i, '')
+                        .replace(/\s+/g, ' ') // Normalize multiple spaces
+                        .trim();
+
+                    if (breed && breed.length > 0) result.breed = breed;
+                }
+            }
+
+            // Method 4: Look for breadcrumb or other elements that might contain breed
+            if (!result.breed) {
+                const breadcrumbItems = document.querySelectorAll('.breadcrumb-item');
+                for (const item of breadcrumbItems) {
+                    const text = item.textContent.trim();
+                    // Breeds are often in breadcrumbs like "Home > Dogs > Labrador Retriever > Max"
+                    if (text &&
+                        !text.toLowerCase().includes('home') &&
+                        !text.toLowerCase().includes('search') &&
+                        !text.toLowerCase().includes('dogs') &&
+                        !text.toLowerCase().includes('cats') &&
+                        text !== result.name) {
+                        result.breed = text;
+                        break;
+                    }
+                }
+            }
+
+            // Fallback: If still no breed, use "Mixed Breed" as default
+            if (!result.breed) {
+                result.breed = 'Mixed Breed';
             }
 
             // Try to find the main image
-            const galleryImage = document.querySelector('.pet-photo[data-src]');
+            // Look for the main pet photo (not thumbnails in carousel)
+            const galleryImage = document.querySelector('.pet-photo[data-src]:not(.thumbnail)');
             if (galleryImage) {
                 const dataSrc = galleryImage.getAttribute('data-src');
                 if (dataSrc && dataSrc.startsWith('http')) {
@@ -201,15 +268,39 @@ async function scrapeAnimalPage(url) {
         if (data.imageUrl) {
             try {
                 console.error('[Scraper] Downloading image from:', data.imageUrl);
-                const imageResponse = await page.goto(data.imageUrl, { waitUntil: 'networkidle2' });
+
+                // Create a new page for downloading the image to avoid affecting the main page
+                const imgPage = await browser.newPage();
+                const imageResponse = await imgPage.goto(data.imageUrl, {
+                    waitUntil: 'networkidle0',
+                    timeout: 30000
+                });
+
+                if (!imageResponse || !imageResponse.ok()) {
+                    throw new Error(`Failed to download image: ${imageResponse?.status()}`);
+                }
+
                 const imageBuffer = await imageResponse.buffer();
+                await imgPage.close();
+
+                // Determine file extension from URL or content-type
+                const contentType = imageResponse.headers()['content-type'] || '';
+                let ext = 'jpg';
+                if (contentType.includes('png') || data.imageUrl.includes('.png')) {
+                    ext = 'png';
+                } else if (contentType.includes('gif') || data.imageUrl.includes('.gif')) {
+                    ext = 'gif';
+                } else if (contentType.includes('webp') || data.imageUrl.includes('.webp')) {
+                    ext = 'webp';
+                }
 
                 // Save to temporary location
                 const timestamp = Date.now();
-                imagePath = path.join('./.tmp', `scraped-${timestamp}.jpg`);
+                imagePath = path.join('./.tmp', `scraped-${timestamp}.${ext}`);
                 await fs.mkdir('./.tmp', { recursive: true });
                 await fs.writeFile(imagePath, imageBuffer);
                 console.error('[Scraper] Image saved to:', imagePath);
+                console.error('[Scraper] Image size:', imageBuffer.length, 'bytes');
             } catch (imgErr) {
                 console.error('[Scraper] Error downloading image:', imgErr.message);
             }

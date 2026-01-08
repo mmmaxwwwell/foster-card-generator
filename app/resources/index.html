@@ -478,6 +478,171 @@
             font-size: 0.95rem;
             margin: 0;
         }
+
+        .animal-select-list {
+            max-height: 400px;
+            overflow-y: auto;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            padding: 10px;
+        }
+
+        .animal-select-item {
+            display: flex;
+            align-items: center;
+            padding: 12px;
+            border-radius: 6px;
+            margin-bottom: 8px;
+            cursor: pointer;
+            transition: background-color 0.2s;
+            border: 2px solid transparent;
+        }
+
+        .animal-select-item:hover {
+            background-color: #f5f5f5;
+        }
+
+        .animal-select-item.selected {
+            background-color: #e8f0fe;
+            border-color: #667eea;
+        }
+
+        .animal-select-item input[type="checkbox"] {
+            margin-right: 12px;
+            width: 20px;
+            height: 20px;
+            cursor: pointer;
+        }
+
+        .animal-select-item label {
+            cursor: pointer;
+            flex: 1;
+            margin: 0;
+            font-size: 1rem;
+        }
+
+        .loading-spinner {
+            text-align: center;
+            padding: 40px;
+            color: #667eea;
+        }
+
+        .loading-spinner::after {
+            content: '...';
+            animation: dots 1.5s infinite;
+        }
+
+        @keyframes dots {
+            0%, 20% { content: '.'; }
+            40% { content: '..'; }
+            60%, 100% { content: '...'; }
+        }
+
+        .select-all-container {
+            padding: 10px;
+            border-bottom: 2px solid #e0e0e0;
+            margin-bottom: 10px;
+        }
+
+        .select-all-container label {
+            display: flex;
+            align-items: center;
+            font-weight: 600;
+            cursor: pointer;
+        }
+
+        .select-all-container input[type="checkbox"] {
+            margin-right: 10px;
+            width: 20px;
+            height: 20px;
+            cursor: pointer;
+        }
+
+        .btn-danger-outline {
+            background: white;
+            color: #dc3545;
+            border: 2px solid #dc3545;
+        }
+
+        .btn-danger-outline:hover {
+            background: #dc3545;
+            color: white;
+        }
+
+        .delete-animal-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+            gap: 15px;
+            max-height: 500px;
+            overflow-y: auto;
+            padding: 10px;
+        }
+
+        .delete-animal-item {
+            border: 3px solid #e0e0e0;
+            border-radius: 12px;
+            padding: 10px;
+            cursor: pointer;
+            transition: all 0.2s;
+            text-align: center;
+            background: white;
+        }
+
+        .delete-animal-item:hover {
+            border-color: #dc3545;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(220, 53, 69, 0.2);
+        }
+
+        .delete-animal-item.selected {
+            border-color: #dc3545;
+            background: #fff5f5;
+        }
+
+        .delete-animal-item input[type="checkbox"] {
+            margin-bottom: 8px;
+            width: 20px;
+            height: 20px;
+            cursor: pointer;
+        }
+
+        .delete-animal-thumbnail {
+            width: 100%;
+            height: 120px;
+            object-fit: cover;
+            border-radius: 8px;
+            margin-bottom: 8px;
+            background: #f0f0f0;
+        }
+
+        .delete-animal-no-image {
+            width: 100%;
+            height: 120px;
+            background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 8px;
+            font-size: 2rem;
+            margin-bottom: 8px;
+        }
+
+        .delete-animal-name {
+            font-weight: 600;
+            color: #333;
+            font-size: 0.9rem;
+            word-wrap: break-word;
+        }
+
+        #printMultipleModal .delete-animal-item:hover {
+            border-color: #667eea;
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.2);
+        }
+
+        #printMultipleModal .delete-animal-item.selected {
+            border-color: #667eea;
+            background: #e8f0fe;
+        }
     </style>
 </head>
 <body>
@@ -490,6 +655,8 @@
         <div class="controls">
             <button onclick="openCreateModal()">Create Animal</button>
             <button onclick="loadAnimals()">Refresh</button>
+            <button onclick="openPrintMultipleModal()">Print Multiple</button>
+            <button onclick="openDeleteMultipleModal()" class="btn-danger-outline">Delete Multiple</button>
         </div>
 
         <div id="content" class="loading">
@@ -512,6 +679,10 @@
                 <button class="option-button" onclick="selectCreateOption('scrape')">
                     <h3>Scrape from URL</h3>
                     <p>Import animal data from an adoption website URL</p>
+                </button>
+                <button class="option-button" onclick="selectCreateOption('selectFromSite')">
+                    <h3>Select from Site</h3>
+                    <p>Browse and select multiple animals from Wagtopia</p>
                 </button>
             </div>
         </div>
@@ -548,7 +719,8 @@
                 <button class="modal-close" onclick="closeManualEntryModal()">&times;</button>
             </div>
             <div class="modal-body">
-                <div class="modal-image-container" onclick="addNewAnimalImage()">
+                <input type="file" id="newAnimalImageInput" accept="image/jpeg,image/jpg,image/png,image/gif,image/webp" style="display: none;" onchange="handleNewAnimalImageSelected(event)">
+                <div class="modal-image-container" onclick="document.getElementById('newAnimalImageInput').click()">
                     <div id="newAnimalNoImage" class="modal-no-image">🐕</div>
                     <div class="image-overlay">
                         <div class="image-overlay-text">
@@ -660,12 +832,9 @@
     <!-- Edit Modal -->
     <div id="editModal" class="modal-overlay">
         <div class="modal">
-            <div class="modal-header">
-                <h2 id="modalTitle">Edit Animal</h2>
-                <button class="modal-close" onclick="closeModal()">&times;</button>
-            </div>
             <div class="modal-body">
-                <div class="modal-image-container" onclick="changeImage()">
+                <input type="file" id="editImageInput" accept="image/jpeg,image/jpg,image/png,image/gif,image/webp" style="display: none;" onchange="handleEditImageSelected(event)">
+                <div class="modal-image-container" onclick="document.getElementById('editImageInput').click()">
                     <img id="modalImage" class="modal-image" src="" alt="">
                     <div id="modalNoImage" class="modal-no-image" style="display: none;">🐕</div>
                     <div class="image-overlay">
@@ -774,6 +943,75 @@
                 <button class="btn btn-danger" onclick="deleteAnimal()">Delete</button>
                 <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
                 <button class="btn btn-primary" onclick="saveAnimal()">Save Changes</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Select from Site Modal -->
+    <div id="selectFromSiteModal" class="modal-overlay">
+        <div class="modal">
+            <div class="modal-header">
+                <h2>Select Animals from Wagtopia</h2>
+                <button class="modal-close" onclick="closeSelectFromSiteModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div id="animalListContainer">
+                    <div class="loading-spinner">Loading animals from Wagtopia</div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeSelectFromSiteModal()">Cancel</button>
+                <button class="btn btn-primary" onclick="importSelectedAnimals()" id="importButton" disabled>Import Selected</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Delete Multiple Modal -->
+    <div id="deleteMultipleModal" class="modal-overlay">
+        <div class="modal">
+            <div class="modal-header">
+                <h2>Delete Multiple Animals</h2>
+                <button class="modal-close" onclick="closeDeleteMultipleModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="select-all-container">
+                    <label>
+                        <input type="checkbox" id="deleteSelectAllCheckbox" onchange="toggleDeleteSelectAll()">
+                        Select All
+                    </label>
+                </div>
+                <div id="deleteAnimalGrid" class="delete-animal-grid">
+                    <!-- Animals will be populated here -->
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeDeleteMultipleModal()">Cancel</button>
+                <button class="btn btn-danger" onclick="deleteSelectedAnimals()" id="deleteButton" disabled>Delete Selected</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Print Multiple Modal -->
+    <div id="printMultipleModal" class="modal-overlay">
+        <div class="modal">
+            <div class="modal-header">
+                <h2>Print Multiple Animals</h2>
+                <button class="modal-close" onclick="closePrintMultipleModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="select-all-container">
+                    <label>
+                        <input type="checkbox" id="printSelectAllCheckbox" onchange="togglePrintSelectAll()">
+                        Select All
+                    </label>
+                </div>
+                <div id="printAnimalGrid" class="delete-animal-grid">
+                    <!-- Animals will be populated here -->
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closePrintMultipleModal()">Cancel</button>
+                <button class="btn btn-primary" onclick="printSelectedAnimals()" id="printButton" disabled>Print Selected</button>
             </div>
         </div>
     </div>

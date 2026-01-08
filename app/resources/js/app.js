@@ -72,12 +72,13 @@ async function getImageAsDataUrl(animalId) {
         const [mime, hexData] = result.stdOut.trim().split('|');
         if (!mime || !hexData) return null;
 
-        // Convert hex to base64
-        const bytes = [];
+        // Convert hex to base64 in chunks to avoid call stack overflow
+        let binary = '';
         for (let i = 0; i < hexData.length; i += 2) {
-            bytes.push(parseInt(hexData.substr(i, 2), 16));
+            const byte = parseInt(hexData.substr(i, 2), 16);
+            binary += String.fromCharCode(byte);
         }
-        const base64 = btoa(String.fromCharCode.apply(null, bytes));
+        const base64 = btoa(binary);
 
         return `data:${mime};base64,${base64}`;
     } catch (err) {
@@ -224,6 +225,8 @@ function selectCreateOption(option) {
         openManualEntryModal();
     } else if (option === 'scrape') {
         openScrapeModal();
+    } else if (option === 'selectFromSite') {
+        openSelectFromSiteModal();
     }
 }
 
@@ -408,30 +411,61 @@ function closeManualEntryModal() {
     newAnimalImageData = null;
 }
 
-async function addNewAnimalImage() {
-    console.log('addNewAnimalImage() called');
+async function handleNewAnimalImageSelected(event) {
+    const file = event.target.files[0];
+    if (!file) {
+        console.log('No file selected');
+        return;
+    }
+
+    console.log('File selected:', file.name, 'Size:', file.size, 'Type:', file.type);
 
     try {
-        console.log('Calling Neutralino.os.showOpenDialog...');
-        const result = await Neutralino.os.showOpenDialog('Select Image', {
-            multiSelections: false,
-            filters: [
-                { name: 'Images', extensions: ['jpg', 'jpeg', 'png', 'gif', 'webp'] }
-            ]
-        });
+        // Read file as ArrayBuffer
+        const arrayBuffer = await file.arrayBuffer();
+        const uint8Array = new Uint8Array(arrayBuffer);
 
-        console.log('Dialog result:', result);
-
-        if (result && result.length > 0) {
-            const filePath = result[0];
-            console.log('Selected file:', filePath);
-            await loadNewAnimalImage(filePath);
-        } else {
-            console.log('No file selected');
+        // Convert to hex string for SQLite
+        let hexString = '';
+        for (let i = 0; i < uint8Array.length; i++) {
+            hexString += uint8Array[i].toString(16).padStart(2, '0');
         }
+
+        // Store new animal image data
+        newAnimalImageData = {
+            hex: hexString,
+            mime: file.type || 'image/jpeg',
+            path: file.name
+        };
+
+        // Convert to base64 for preview
+        let binary = '';
+        for (let i = 0; i < uint8Array.length; i++) {
+            binary += String.fromCharCode(uint8Array[i]);
+        }
+        const base64 = btoa(binary);
+        const dataUrl = `data:${file.type};base64,${base64}`;
+
+        // Update preview - create img element if it doesn't exist
+        const imageContainer = document.querySelector('#manualEntryModal .modal-image-container');
+        let modalImage = document.getElementById('newAnimalImage');
+        const modalNoImage = document.getElementById('newAnimalNoImage');
+
+        if (!modalImage) {
+            modalImage = document.createElement('img');
+            modalImage.id = 'newAnimalImage';
+            modalImage.className = 'modal-image';
+            imageContainer.insertBefore(modalImage, imageContainer.firstChild);
+        }
+
+        modalImage.src = dataUrl;
+        modalImage.style.display = 'block';
+        modalNoImage.style.display = 'none';
+
+        showToast('Image selected. Click Create to save animal.');
     } catch (err) {
-        console.error('Error selecting image:', err);
-        showToast('Error selecting image: ' + err.message, 'error');
+        console.error('Error loading image:', err);
+        showToast('Error loading image: ' + err.message, 'error');
     }
 }
 
@@ -559,7 +593,6 @@ function openEditModal(animalId) {
     pendingImageData = null; // Reset pending image
 
     document.getElementById('editModal').classList.add('active');
-    document.getElementById('modalTitle').textContent = `Edit ${currentAnimal.name}`;
 
     // Set image
     const modalImage = document.getElementById('modalImage');
@@ -603,33 +636,54 @@ function closeModal() {
 }
 
 // Image change functionality
-async function changeImage() {
+async function handleEditImageSelected(event) {
     if (!currentAnimal) return;
 
-    console.log('changeImage() called');
+    const file = event.target.files[0];
+    if (!file) {
+        console.log('No file selected');
+        return;
+    }
+
+    console.log('File selected:', file.name, 'Size:', file.size, 'Type:', file.type);
 
     try {
-        console.log('Calling Neutralino.os.showOpenDialog...');
-        const result = await Neutralino.os.showOpenDialog('Select Image', {
-            multiSelections: false,
-            filters: [
-                { name: 'Images', extensions: ['jpg', 'jpeg', 'png', 'gif', 'webp'] }
-            ]
-        });
+        // Read file as ArrayBuffer
+        const arrayBuffer = await file.arrayBuffer();
+        const uint8Array = new Uint8Array(arrayBuffer);
 
-        console.log('Dialog result:', result);
-
-        if (result && result.length > 0) {
-            const filePath = result[0];
-            console.log('Selected file:', filePath);
-            await loadNewImage(filePath);
-        } else {
-            console.log('No file selected');
+        // Convert to hex string for SQLite
+        let hexString = '';
+        for (let i = 0; i < uint8Array.length; i++) {
+            hexString += uint8Array[i].toString(16).padStart(2, '0');
         }
+
+        // Store pending image data
+        pendingImageData = {
+            hex: hexString,
+            mime: file.type || 'image/jpeg',
+            path: file.name
+        };
+
+        // Convert to base64 for preview
+        let binary = '';
+        for (let i = 0; i < uint8Array.length; i++) {
+            binary += String.fromCharCode(uint8Array[i]);
+        }
+        const base64 = btoa(binary);
+        const dataUrl = `data:${file.type};base64,${base64}`;
+
+        // Update preview
+        const modalImage = document.getElementById('modalImage');
+        const modalNoImage = document.getElementById('modalNoImage');
+        modalImage.src = dataUrl;
+        modalImage.style.display = 'block';
+        modalNoImage.style.display = 'none';
+
+        showToast('Image selected. Click Save to apply changes.');
     } catch (err) {
-        console.error('Error selecting image:', err);
-        console.error('Error details:', JSON.stringify(err));
-        showToast('Error selecting image: ' + err.message, 'error');
+        console.error('Error loading image:', err);
+        showToast('Error loading image: ' + err.message, 'error');
     }
 }
 
@@ -769,6 +823,132 @@ async function deleteAnimal() {
     }
 }
 
+// Print Multiple Modal functions
+let selectedPrintAnimalIds = new Set();
+
+function openPrintMultipleModal() {
+    document.getElementById('printMultipleModal').classList.add('active');
+    selectedPrintAnimalIds.clear();
+    renderPrintAnimalGrid();
+}
+
+function closePrintMultipleModal() {
+    document.getElementById('printMultipleModal').classList.remove('active');
+    selectedPrintAnimalIds.clear();
+}
+
+function renderPrintAnimalGrid() {
+    const grid = document.getElementById('printAnimalGrid');
+    const printButton = document.getElementById('printButton');
+    const selectAllCheckbox = document.getElementById('printSelectAllCheckbox');
+
+    if (animals.length === 0) {
+        grid.innerHTML = '<div style="padding: 20px; text-align: center; color: #666;">No animals to print.</div>';
+        printButton.disabled = true;
+        return;
+    }
+
+    let html = '';
+    for (const animal of animals) {
+        const isSelected = selectedPrintAnimalIds.has(animal.id);
+        html += `
+            <div class="delete-animal-item ${isSelected ? 'selected' : ''}" onclick="togglePrintAnimal(${animal.id})">
+                <input type="checkbox" ${isSelected ? 'checked' : ''} onclick="event.stopPropagation(); togglePrintAnimal(${animal.id})">
+                ${animal.imageDataUrl
+                    ? `<img class="delete-animal-thumbnail" src="${animal.imageDataUrl}" alt="${animal.name}">`
+                    : `<div class="delete-animal-no-image">🐕</div>`
+                }
+                <div class="delete-animal-name">${animal.name}</div>
+            </div>
+        `;
+    }
+
+    grid.innerHTML = html;
+
+    // Update select all checkbox state
+    selectAllCheckbox.checked = selectedPrintAnimalIds.size === animals.length && animals.length > 0;
+
+    updatePrintButton();
+}
+
+function togglePrintAnimal(animalId) {
+    if (selectedPrintAnimalIds.has(animalId)) {
+        selectedPrintAnimalIds.delete(animalId);
+    } else {
+        selectedPrintAnimalIds.add(animalId);
+    }
+    renderPrintAnimalGrid();
+}
+
+function togglePrintSelectAll() {
+    const selectAllCheckbox = document.getElementById('printSelectAllCheckbox');
+
+    if (selectAllCheckbox.checked) {
+        // Select all
+        for (const animal of animals) {
+            selectedPrintAnimalIds.add(animal.id);
+        }
+    } else {
+        // Deselect all
+        selectedPrintAnimalIds.clear();
+    }
+
+    renderPrintAnimalGrid();
+}
+
+function updatePrintButton() {
+    const printButton = document.getElementById('printButton');
+    const count = selectedPrintAnimalIds.size;
+
+    if (count > 0) {
+        printButton.disabled = false;
+        printButton.textContent = `Print Selected (${count})`;
+    } else {
+        printButton.disabled = true;
+        printButton.textContent = 'Print Selected';
+    }
+}
+
+async function printSelectedAnimals() {
+    if (selectedPrintAnimalIds.size === 0) {
+        showToast('Please select at least one animal to print', 'error');
+        return;
+    }
+
+    const count = selectedPrintAnimalIds.size;
+    const animalNames = animals
+        .filter(a => selectedPrintAnimalIds.has(a.id))
+        .map(a => a.name)
+        .slice(0, 3)
+        .join(', ');
+
+    const displayNames = count > 3 ? `${animalNames} and ${count - 3} more` : animalNames;
+
+    const confirmed = confirm(
+        `Generate cards for ${count} animal${count > 1 ? 's' : ''}?\n\n${displayNames}\n\nCards will be added to the print queue.`
+    );
+
+    if (!confirmed) return;
+
+    // Add all selected animals to the generation queue
+    const idsToGenerate = Array.from(selectedPrintAnimalIds);
+    for (const animalId of idsToGenerate) {
+        const animal = animals.find(a => a.id === animalId);
+        if (animal) {
+            cardGenerationQueue.push({ animalId });
+            console.log('[Queue] Added', animal.name, 'to queue. Queue length:', cardGenerationQueue.length);
+        }
+    }
+
+    showToast(`Added ${count} animal${count > 1 ? 's' : ''} to generation queue`, 'success');
+
+    // Close modal
+    closePrintMultipleModal();
+
+    // Start processing the queue
+    processCardGenerationQueue();
+}
+
 // Close modal on escape key
 document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
@@ -776,6 +956,9 @@ document.addEventListener('keydown', (e) => {
         closeCreateModal();
         closeManualEntryModal();
         closeScrapeModal();
+        closeSelectFromSiteModal();
+        closeDeleteMultipleModal();
+        closePrintMultipleModal();
     }
 });
 
@@ -804,20 +987,477 @@ document.getElementById('scrapeModal').addEventListener('click', (e) => {
     }
 });
 
+document.getElementById('selectFromSiteModal').addEventListener('click', (e) => {
+    if (e.target.classList.contains('modal-overlay')) {
+        closeSelectFromSiteModal();
+    }
+});
+
+document.getElementById('deleteMultipleModal').addEventListener('click', (e) => {
+    if (e.target.classList.contains('modal-overlay')) {
+        closeDeleteMultipleModal();
+    }
+});
+
+document.getElementById('printMultipleModal').addEventListener('click', (e) => {
+    if (e.target.classList.contains('modal-overlay')) {
+        closePrintMultipleModal();
+    }
+});
+
+// Delete Multiple Modal functions
+let selectedDeleteAnimalIds = new Set();
+
+function openDeleteMultipleModal() {
+    document.getElementById('deleteMultipleModal').classList.add('active');
+    selectedDeleteAnimalIds.clear();
+    renderDeleteAnimalGrid();
+}
+
+function closeDeleteMultipleModal() {
+    document.getElementById('deleteMultipleModal').classList.remove('active');
+    selectedDeleteAnimalIds.clear();
+}
+
+function renderDeleteAnimalGrid() {
+    const grid = document.getElementById('deleteAnimalGrid');
+    const deleteButton = document.getElementById('deleteButton');
+    const selectAllCheckbox = document.getElementById('deleteSelectAllCheckbox');
+
+    if (animals.length === 0) {
+        grid.innerHTML = '<div style="padding: 20px; text-align: center; color: #666;">No animals to delete.</div>';
+        deleteButton.disabled = true;
+        return;
+    }
+
+    let html = '';
+    for (const animal of animals) {
+        const isSelected = selectedDeleteAnimalIds.has(animal.id);
+        html += `
+            <div class="delete-animal-item ${isSelected ? 'selected' : ''}" onclick="toggleDeleteAnimal(${animal.id})">
+                <input type="checkbox" ${isSelected ? 'checked' : ''} onclick="event.stopPropagation(); toggleDeleteAnimal(${animal.id})">
+                ${animal.imageDataUrl
+                    ? `<img class="delete-animal-thumbnail" src="${animal.imageDataUrl}" alt="${animal.name}">`
+                    : `<div class="delete-animal-no-image">🐕</div>`
+                }
+                <div class="delete-animal-name">${animal.name}</div>
+            </div>
+        `;
+    }
+
+    grid.innerHTML = html;
+
+    // Update select all checkbox state
+    selectAllCheckbox.checked = selectedDeleteAnimalIds.size === animals.length && animals.length > 0;
+
+    updateDeleteButton();
+}
+
+function toggleDeleteAnimal(animalId) {
+    if (selectedDeleteAnimalIds.has(animalId)) {
+        selectedDeleteAnimalIds.delete(animalId);
+    } else {
+        selectedDeleteAnimalIds.add(animalId);
+    }
+    renderDeleteAnimalGrid();
+}
+
+function toggleDeleteSelectAll() {
+    const selectAllCheckbox = document.getElementById('deleteSelectAllCheckbox');
+
+    if (selectAllCheckbox.checked) {
+        // Select all
+        for (const animal of animals) {
+            selectedDeleteAnimalIds.add(animal.id);
+        }
+    } else {
+        // Deselect all
+        selectedDeleteAnimalIds.clear();
+    }
+
+    renderDeleteAnimalGrid();
+}
+
+function updateDeleteButton() {
+    const deleteButton = document.getElementById('deleteButton');
+    const count = selectedDeleteAnimalIds.size;
+
+    if (count > 0) {
+        deleteButton.disabled = false;
+        deleteButton.textContent = `Delete Selected (${count})`;
+    } else {
+        deleteButton.disabled = true;
+        deleteButton.textContent = 'Delete Selected';
+    }
+}
+
+async function deleteSelectedAnimals() {
+    if (selectedDeleteAnimalIds.size === 0) {
+        showToast('Please select at least one animal to delete', 'error');
+        return;
+    }
+
+    const count = selectedDeleteAnimalIds.size;
+    const animalNames = animals
+        .filter(a => selectedDeleteAnimalIds.has(a.id))
+        .map(a => a.name)
+        .slice(0, 3)
+        .join(', ');
+
+    const displayNames = count > 3 ? `${animalNames} and ${count - 3} more` : animalNames;
+
+    const confirmed = confirm(
+        `Are you sure you want to delete ${count} animal${count > 1 ? 's' : ''}?\n\n${displayNames}\n\nThis cannot be undone.`
+    );
+
+    if (!confirmed) return;
+
+    const deleteButton = document.getElementById('deleteButton');
+    const grid = document.getElementById('deleteAnimalGrid');
+
+    // Disable button during deletion
+    deleteButton.disabled = true;
+    const originalText = deleteButton.textContent;
+
+    try {
+        grid.innerHTML = '<div class="loading-spinner">Deleting animals...</div>';
+
+        const idsToDelete = Array.from(selectedDeleteAnimalIds);
+        let successCount = 0;
+        let failCount = 0;
+
+        for (let i = 0; i < idsToDelete.length; i++) {
+            const animalId = idsToDelete[i];
+            const animal = animals.find(a => a.id === animalId);
+            const animalName = animal ? animal.name : `ID ${animalId}`;
+
+            deleteButton.textContent = `Deleting ${i + 1}/${idsToDelete.length}...`;
+
+            try {
+                const sql = `DELETE FROM animals WHERE id = ${animalId};`;
+                await runSQL(sql);
+                console.log(`[App] Deleted animal: ${animalName}`);
+                successCount++;
+            } catch (err) {
+                console.error(`[App] Error deleting ${animalName}:`, err);
+                failCount++;
+            }
+        }
+
+        // Show summary
+        let message = `Deleted ${successCount} animal${successCount !== 1 ? 's' : ''}`;
+        if (failCount > 0) {
+            message += `, ${failCount} failed`;
+        }
+        showToast(message, failCount > 0 ? 'error' : 'success');
+
+        // Close modal and refresh animal list
+        closeDeleteMultipleModal();
+        await loadAnimals();
+
+    } catch (err) {
+        console.error('[App] Error during deletion:', err);
+        showToast(`Error deleting animals: ${err.message}`, 'error');
+        renderDeleteAnimalGrid();
+    } finally {
+        deleteButton.disabled = false;
+        deleteButton.textContent = originalText;
+    }
+}
+
+// Select from Site Modal functions
+let scrapedAnimals = [];
+let selectedAnimalUrls = new Set();
+
+async function openSelectFromSiteModal() {
+    document.getElementById('selectFromSiteModal').classList.add('active');
+    scrapedAnimals = [];
+    selectedAnimalUrls.clear();
+
+    const container = document.getElementById('animalListContainer');
+    const importButton = document.getElementById('importButton');
+
+    container.innerHTML = '<div class="loading-spinner">Loading animals from Wagtopia</div>';
+    importButton.disabled = true;
+
+    try {
+        // Call the scraper script to get the list of animals
+        const url = 'https://www.wagtopia.com/search/org?id=1841035';
+        const command = `node scrape-list.js "${url.replace(/"/g, '\\"')}"`;
+        console.log('[App] Executing list scraper command');
+
+        const result = await Neutralino.os.execCommand(command, { cwd: NL_PATH });
+
+        console.log('[App] List scraper exit code:', result.exitCode);
+
+        // Log stderr (debug messages from scraper)
+        if (result.stdErr) {
+            const lines = result.stdErr.split('\n');
+            for (const line of lines) {
+                if (line.trim()) {
+                    console.log('[List Scraper]', line);
+                }
+            }
+        }
+
+        if (result.exitCode !== 0) {
+            throw new Error(result.stdErr || 'List scraping failed');
+        }
+
+        // Parse the scraped list from stdout
+        scrapedAnimals = JSON.parse(result.stdOut.trim());
+        console.log('[App] Scraped', scrapedAnimals.length, 'animals');
+
+        if (scrapedAnimals.length === 0) {
+            container.innerHTML = '<div style="padding: 20px; text-align: center; color: #666;">No animals found on the page.</div>';
+            return;
+        }
+
+        // Render the animal selection list
+        renderAnimalSelectionList();
+
+    } catch (err) {
+        console.error('[App] Error loading animal list:', err);
+        container.innerHTML = `<div style="padding: 20px; text-align: center; color: #dc3545;">Error loading animals: ${err.message}</div>`;
+    }
+}
+
+function closeSelectFromSiteModal() {
+    document.getElementById('selectFromSiteModal').classList.remove('active');
+    scrapedAnimals = [];
+    selectedAnimalUrls.clear();
+}
+
+function renderAnimalSelectionList() {
+    const container = document.getElementById('animalListContainer');
+    const importButton = document.getElementById('importButton');
+
+    // Save scroll position before re-rendering
+    const listElement = container.querySelector('.animal-select-list');
+    const scrollTop = listElement ? listElement.scrollTop : 0;
+
+    let html = '<div class="select-all-container">';
+    html += '<label><input type="checkbox" id="selectAllCheckbox" onchange="toggleSelectAll()"> Select All</label>';
+    html += '</div>';
+    html += '<div class="animal-select-list">';
+
+    for (const animal of scrapedAnimals) {
+        const isSelected = selectedAnimalUrls.has(animal.url);
+        html += `<div class="animal-select-item ${isSelected ? 'selected' : ''}" onclick="toggleAnimalSelection('${animal.url}')">`;
+        html += `<input type="checkbox" ${isSelected ? 'checked' : ''} onchange="event.stopPropagation(); toggleAnimalSelection('${animal.url}')">`;
+        html += `<label>${animal.name}</label>`;
+        html += '</div>';
+    }
+
+    html += '</div>';
+    container.innerHTML = html;
+
+    // Restore scroll position after re-rendering
+    const newListElement = container.querySelector('.animal-select-list');
+    if (newListElement && scrollTop > 0) {
+        newListElement.scrollTop = scrollTop;
+    }
+
+    updateImportButton();
+}
+
+function toggleAnimalSelection(url) {
+    if (selectedAnimalUrls.has(url)) {
+        selectedAnimalUrls.delete(url);
+    } else {
+        selectedAnimalUrls.add(url);
+    }
+
+    renderAnimalSelectionList();
+}
+
+function toggleSelectAll() {
+    const selectAllCheckbox = document.getElementById('selectAllCheckbox');
+
+    if (selectAllCheckbox.checked) {
+        // Select all
+        for (const animal of scrapedAnimals) {
+            selectedAnimalUrls.add(animal.url);
+        }
+    } else {
+        // Deselect all
+        selectedAnimalUrls.clear();
+    }
+
+    renderAnimalSelectionList();
+}
+
+function updateImportButton() {
+    const importButton = document.getElementById('importButton');
+    const count = selectedAnimalUrls.size;
+
+    if (count > 0) {
+        importButton.disabled = false;
+        importButton.textContent = `Import Selected (${count})`;
+    } else {
+        importButton.disabled = true;
+        importButton.textContent = 'Import Selected';
+    }
+}
+
+async function importSelectedAnimals() {
+    if (selectedAnimalUrls.size === 0) {
+        showToast('Please select at least one animal', 'error');
+        return;
+    }
+
+    const importButton = document.getElementById('importButton');
+    const container = document.getElementById('animalListContainer');
+
+    // Disable the button during import
+    importButton.disabled = true;
+    const originalText = importButton.textContent;
+
+    const urlsToImport = Array.from(selectedAnimalUrls);
+    let successCount = 0;
+    let failCount = 0;
+
+    try {
+        container.innerHTML = '<div class="loading-spinner">Importing animals...</div>';
+
+        for (let i = 0; i < urlsToImport.length; i++) {
+            const url = urlsToImport[i];
+            const animalName = scrapedAnimals.find(a => a.url === url)?.name || 'Unknown';
+
+            importButton.textContent = `Importing ${i + 1}/${urlsToImport.length}: ${animalName}`;
+            console.log(`[App] Importing ${i + 1}/${urlsToImport.length}: ${animalName}`);
+
+            try {
+                // Call the scraper script
+                const command = `node scrape-url.js "${url.replace(/"/g, '\\"')}"`;
+                const result = await Neutralino.os.execCommand(command, { cwd: NL_PATH });
+
+                if (result.exitCode !== 0) {
+                    throw new Error(result.stdErr || 'Scraping failed');
+                }
+
+                // Parse the scraped data from stdout
+                const scrapedData = JSON.parse(result.stdOut.trim());
+                console.log('[App] Scraped data for:', scrapedData.name);
+
+                // Load image if available
+                let imageData = null;
+                if (scrapedData.imagePath) {
+                    try {
+                        const imagePath = scrapedData.imagePath.startsWith('/')
+                            ? scrapedData.imagePath
+                            : `${NL_PATH}/${scrapedData.imagePath}`;
+
+                        const data = await Neutralino.filesystem.readBinaryFile(imagePath);
+                        const ext = imagePath.split('.').pop().toLowerCase();
+                        const mimeTypes = {
+                            'jpg': 'image/jpeg',
+                            'jpeg': 'image/jpeg',
+                            'png': 'image/png',
+                            'gif': 'image/gif',
+                            'webp': 'image/webp'
+                        };
+                        const mime = mimeTypes[ext] || 'image/jpeg';
+
+                        const uint8Array = new Uint8Array(data);
+                        let hexString = '';
+                        for (let j = 0; j < uint8Array.length; j++) {
+                            hexString += uint8Array[j].toString(16).padStart(2, '0');
+                        }
+
+                        imageData = {
+                            hex: hexString,
+                            mime: mime,
+                            path: imagePath.split('/').pop()
+                        };
+                    } catch (imgErr) {
+                        console.error('[App] Error loading image:', imgErr);
+                    }
+                }
+
+                // Insert into database
+                let sql;
+                if (imageData) {
+                    sql = `INSERT INTO animals (
+                        name, breed, slug, age_long, age_short, size, gender, shots, housetrained,
+                        kids, dogs, cats, portrait_path, portrait_mime, portrait_data
+                    ) VALUES (
+                        '${escapeSQL(scrapedData.name)}',
+                        '${escapeSQL(scrapedData.breed)}',
+                        '${escapeSQL(scrapedData.slug)}',
+                        '${escapeSQL(scrapedData.age_long)}',
+                        '${escapeSQL(scrapedData.age_short)}',
+                        '${escapeSQL(scrapedData.size)}',
+                        '${escapeSQL(scrapedData.gender)}',
+                        ${scrapedData.shots ? 1 : 0},
+                        ${scrapedData.housetrained ? 1 : 0},
+                        '${escapeSQL(scrapedData.kids)}',
+                        '${escapeSQL(scrapedData.dogs)}',
+                        '${escapeSQL(scrapedData.cats)}',
+                        '${escapeSQL(imageData.path)}',
+                        '${escapeSQL(imageData.mime)}',
+                        X'${imageData.hex}'
+                    );`;
+                } else {
+                    sql = `INSERT INTO animals (
+                        name, breed, slug, age_long, age_short, size, gender, shots, housetrained,
+                        kids, dogs, cats
+                    ) VALUES (
+                        '${escapeSQL(scrapedData.name)}',
+                        '${escapeSQL(scrapedData.breed)}',
+                        '${escapeSQL(scrapedData.slug)}',
+                        '${escapeSQL(scrapedData.age_long)}',
+                        '${escapeSQL(scrapedData.age_short)}',
+                        '${escapeSQL(scrapedData.size)}',
+                        '${escapeSQL(scrapedData.gender)}',
+                        ${scrapedData.shots ? 1 : 0},
+                        ${scrapedData.housetrained ? 1 : 0},
+                        '${escapeSQL(scrapedData.kids)}',
+                        '${escapeSQL(scrapedData.dogs)}',
+                        '${escapeSQL(scrapedData.cats)}'
+                    );`;
+                }
+
+                await runSQL(sql);
+                console.log('[App] Successfully imported:', scrapedData.name);
+                successCount++;
+
+                // Clean up temporary image file
+                if (scrapedData.imagePath) {
+                    try {
+                        await Neutralino.os.execCommand(`rm "${scrapedData.imagePath}"`, { cwd: NL_PATH });
+                    } catch (cleanupErr) {
+                        console.error('[App] Error cleaning up temp file:', cleanupErr);
+                    }
+                }
+
+            } catch (err) {
+                console.error(`[App] Error importing ${animalName}:`, err);
+                failCount++;
+            }
+        }
+
+        // Show summary
+        let message = `Import complete: ${successCount} succeeded`;
+        if (failCount > 0) {
+            message += `, ${failCount} failed`;
+        }
+        showToast(message, failCount > 0 ? 'error' : 'success');
+
+        // Close modal and refresh animal list
+        closeSelectFromSiteModal();
+        await loadAnimals();
+
+    } catch (err) {
+        console.error('[App] Error during import:', err);
+        showToast(`Error importing animals: ${err.message}`, 'error');
+    } finally {
+        importButton.disabled = false;
+        importButton.textContent = originalText;
+    }
+}
+
 // Note: Click handlers for image containers are now inline in HTML
-// Keeping stopPropagation functionality by wrapping the functions
-
-const originalChangeImage = changeImage;
-window.changeImage = function(e) {
-    if (e && e.stopPropagation) e.stopPropagation();
-    originalChangeImage();
-};
-
-const originalAddNewAnimalImage = addNewAnimalImage;
-window.addNewAnimalImage = function(e) {
-    if (e && e.stopPropagation) e.stopPropagation();
-    originalAddNewAnimalImage();
-};
 
 // Initialize app
 Neutralino.init();
@@ -831,6 +1471,47 @@ Neutralino.events.on('windowClose', () => {
     Neutralino.app.exit();
 });
 
+// Card generation queue
+let cardGenerationQueue = [];
+let isProcessingQueue = false;
+
+async function processCardGenerationQueue() {
+    if (isProcessingQueue || cardGenerationQueue.length === 0) {
+        return;
+    }
+
+    isProcessingQueue = true;
+
+    while (cardGenerationQueue.length > 0) {
+        const task = cardGenerationQueue.shift();
+        const animal = animals.find(a => a.id === task.animalId);
+
+        if (!animal) {
+            console.error('[Queue] Animal not found:', task.animalId);
+            continue;
+        }
+
+        try {
+            console.log('[Queue] Processing card generation for:', animal.name);
+            showToast(`Generating cards for ${animal.name}... (${cardGenerationQueue.length} in queue)`);
+
+            // Generate front card first
+            await printCardFront(task.animalId);
+
+            // Then generate back card
+            await printCardBack(task.animalId);
+
+            showToast(`Cards generated for ${animal.name}!`);
+        } catch (err) {
+            console.error('[Queue] Error generating cards for', animal.name, ':', err);
+            showToast(`Error generating cards for ${animal.name}: ${err.message}`, 'error');
+        }
+    }
+
+    isProcessingQueue = false;
+    console.log('[Queue] Queue processing complete');
+}
+
 // Generate cards function
 async function generateCards(animalId) {
     const animal = animals.find(a => a.id === animalId);
@@ -839,21 +1520,14 @@ async function generateCards(animalId) {
         return;
     }
 
-    try {
-        showToast(`Generating cards for ${animal.name}...`);
-        console.log('[App] Starting card generation (front and back) for animal:', animal.name);
+    // Add to queue
+    cardGenerationQueue.push({ animalId });
+    console.log('[Queue] Added', animal.name, 'to queue. Queue length:', cardGenerationQueue.length);
 
-        // Generate front card first
-        await printCardFront(animalId);
+    showToast(`${animal.name} added to generation queue (position ${cardGenerationQueue.length})`);
 
-        // Then generate back card
-        await printCardBack(animalId);
-
-        showToast(`Cards generated for ${animal.name}!`);
-    } catch (err) {
-        console.error('[App] Error generating cards:', err);
-        showToast(`Error generating cards: ${err.message}`, 'error');
-    }
+    // Start processing the queue
+    processCardGenerationQueue();
 }
 
 // Print card functions

@@ -103,7 +103,7 @@ async function replaceParametersInHtml(fileName, outputPath, params) {
             } else if (processedParams[key] === false || processedParams[key] === 0 || processedParams[key] === '0') {
                 processedParams[key] = "❌";
             } else {
-                processedParams[key] = "?";
+                processedParams[key] = "? ";
             }
         } else if (typeof processedParams[key] === 'boolean') {
             processedParams[key] = processedParams[key] ? "✅" : "❌";
