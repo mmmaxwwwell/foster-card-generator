@@ -6,6 +6,84 @@ let currentAnimal = null;
 let pendingImageData = null; // Stores new image data before save
 let newAnimalImageData = null; // Stores image data for new animal
 
+// Check if database exists and initialize if needed
+async function initializeDatabase() {
+    try {
+        console.log('[App] Checking if database exists...');
+
+        // Try to query the animals table to see if it exists
+        const result = await Neutralino.os.execCommand(
+            `sqlite3 "${DB_PATH}" "SELECT name FROM sqlite_master WHERE type='table' AND name='animals';"`,
+            { cwd: NL_PATH }
+        );
+
+        if (result.exitCode !== 0 || !result.stdOut.trim()) {
+            console.log('[App] Database or animals table not found. Initializing...');
+
+            // Create the animals table schema
+            const schema = `
+                CREATE TABLE IF NOT EXISTS animals (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT NOT NULL,
+                    slug TEXT NOT NULL,
+                    size TEXT NOT NULL,
+                    shots INTEGER NOT NULL DEFAULT 0,
+                    housetrained INTEGER NOT NULL DEFAULT 0,
+                    breed TEXT NOT NULL,
+                    age_long TEXT NOT NULL,
+                    age_short TEXT NOT NULL,
+                    gender TEXT NOT NULL,
+                    kids TEXT NOT NULL DEFAULT '?',
+                    dogs TEXT NOT NULL DEFAULT '?',
+                    cats TEXT NOT NULL DEFAULT '?',
+                    portrait_path TEXT,
+                    portrait_data BLOB,
+                    portrait_mime TEXT,
+                    created_at TEXT DEFAULT (datetime('now')),
+                    updated_at TEXT DEFAULT (datetime('now'))
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_animals_name ON animals(name);
+
+                CREATE TRIGGER IF NOT EXISTS update_animals_timestamp
+                AFTER UPDATE ON animals
+                BEGIN
+                    UPDATE animals SET updated_at = datetime('now') WHERE id = NEW.id;
+                END;
+            `;
+
+            // Write schema to temp file and execute
+            const tmpFile = `./.tmp/init-schema.sql`;
+            await Neutralino.filesystem.writeFile(tmpFile, schema);
+
+            const initResult = await Neutralino.os.execCommand(
+                `sqlite3 "${DB_PATH}" < "${tmpFile}"`,
+                { cwd: NL_PATH }
+            );
+
+            // Clean up temp file
+            try {
+                await Neutralino.filesystem.removeFile(tmpFile);
+            } catch (cleanupErr) {
+                console.warn('[App] Could not delete temp schema file:', cleanupErr);
+            }
+
+            if (initResult.exitCode !== 0) {
+                throw new Error('Failed to initialize database: ' + initResult.stdErr);
+            }
+
+            console.log('[App] Database initialized successfully (no data seeded)');
+            return true; // Database was created
+        } else {
+            console.log('[App] Database already exists');
+            return false; // Database already existed
+        }
+    } catch (err) {
+        console.error('[App] Error initializing database:', err);
+        throw err;
+    }
+}
+
 async function runSQL(sql) {
     try {
         // Use stdin to avoid command line length limits with large image data
@@ -1464,6 +1542,26 @@ Neutralino.init();
 
 Neutralino.events.on('ready', async () => {
     console.log('Neutralino app ready');
+
+    // Initialize database if needed
+    try {
+        await initializeDatabase();
+    } catch (err) {
+        console.error('[App] Failed to initialize database:', err);
+        const content = document.getElementById('content');
+        if (content) {
+            content.innerHTML = `
+                <div class="error">
+                    <h3>Database Initialization Failed</h3>
+                    <p>${err.message}</p>
+                    <p>Please ensure sqlite3 is installed and accessible.</p>
+                </div>
+            `;
+        }
+        return;
+    }
+
+    // Load animals after initialization
     await loadAnimals();
 });
 

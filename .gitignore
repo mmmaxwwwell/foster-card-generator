@@ -6,3 +6,4 @@ app/.tmp
 example page/
 .tmp/
 result
+.env
