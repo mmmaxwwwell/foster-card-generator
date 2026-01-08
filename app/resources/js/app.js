@@ -1,38 +1,176 @@
-// Database path - use environment variable or relative path
-// The Nix wrapper will set FOSTER_DB_DIR to ~/.local/share/foster-card-generator
+// Logging system - write to user's home directory
+let LOG_DIR = './.tmp';
+let LOG_FILE = './.tmp/app.log';
+const logMessages = [];
+
+async function writeToLogFile(message) {
+    try {
+        const timestamp = new Date().toISOString();
+        const logLine = `[${timestamp}] ${message}\n`;
+
+        // Try to append to the log file
+        let content = '';
+        try {
+            content = await Neutralino.filesystem.readFile(LOG_FILE);
+        } catch (e) {
+            // File doesn't exist yet
+        }
+
+        await Neutralino.filesystem.writeFile(LOG_FILE, content + logLine);
+    } catch (err) {
+        // Silently fail - can't do much if logging fails
+    }
+}
+
+function log(...args) {
+    const message = args.map(arg =>
+        typeof arg === 'object' ? JSON.stringify(arg, null, 2) : String(arg)
+    ).join(' ');
+
+    // Store in memory with timestamp
+    const timestamp = new Date().toISOString();
+    logMessages.push(`[${timestamp}] ${message}`);
+
+    // Try to write to file
+    writeToLogFile(message);
+
+    // Also log to console
+    console.log(...args);
+}
+
+// Function to open log file in system editor
+async function openLogFile() {
+    try {
+        log('[App] Opening log file:', LOG_FILE);
+
+        // Try to open with default text editor
+        await Neutralino.os.execCommand(`xdg-open "${LOG_FILE}"`, {});
+        showToast('Opening log file...');
+    } catch (err) {
+        console.error('[App] Failed to open log file:', err);
+
+        // Fallback: show logs in alert
+        const recentLogs = logMessages.slice(-50).join('\n');
+        alert('Log file location: ' + LOG_FILE + '\n\nRecent logs:\n\n' + recentLogs);
+    }
+}
+
+// Database path - use HOME directory for user data
 let DB_DIR = '../db';
 let DB_PATH = '../db/animals.db';
 
-// Get DB path from environment or use default
-async function getDbPathFromEnv() {
-    try {
-        // Get home directory path for user data
-        const homeResult = await Neutralino.os.execCommand('echo "$HOME/.local/share/foster-card-generator"', { cwd: NL_PATH });
-        if (homeResult.exitCode === 0) {
-            const homeDbDir = homeResult.stdOut.trim();
-            console.log('[App] Home data directory would be:', homeDbDir);
+// Setup paths for installed version
+async function setupPaths() {
+    log('[App] ========== STARTING PATH SETUP ==========');
 
-            // Try to create a test file in ../db to check if it's writable
-            const testFile = '../db/.write-test';
-            try {
-                await Neutralino.filesystem.writeFile(testFile, 'test');
-                await Neutralino.filesystem.removeFile(testFile);
-                console.log('[App] ../db is writable, using development mode');
-            } catch (writeErr) {
-                // Can't write to ../db, so use user data directory
-                console.log('[App] ../db is not writable, using user data directory');
-                DB_DIR = homeDbDir;
-                DB_PATH = `${homeDbDir}/animals.db`;
-                // Ensure directory exists
-                await Neutralino.os.execCommand(`mkdir -p "${DB_DIR}"`, { cwd: NL_PATH });
-                console.log('[App] Created user data directory:', DB_DIR);
+    // Log ALL Neutralino global variables
+    const allGlobals = {
+        NL_PATH: typeof NL_PATH !== 'undefined' ? NL_PATH : 'UNDEFINED',
+        NL_APPID: typeof NL_APPID !== 'undefined' ? NL_APPID : 'UNDEFINED',
+        NL_MODE: typeof NL_MODE !== 'undefined' ? NL_MODE : 'UNDEFINED',
+        NL_CWD: typeof NL_CWD !== 'undefined' ? NL_CWD : 'UNDEFINED'
+    };
+    log('[App] Neutralino globals:', JSON.stringify(allGlobals, null, 2));
+
+    try {
+        // Get home directory
+        log('[App] Executing command to get HOME...');
+        const homeResult = await Neutralino.os.execCommand('echo "$HOME/.local/share/foster-card-generator"', {});
+        log('[App] Home command exit code:', homeResult.exitCode);
+        log('[App] Home command stdout:', homeResult.stdOut);
+        log('[App] Home command stderr:', homeResult.stdErr);
+
+        if (homeResult.exitCode === 0) {
+            const userDataDir = homeResult.stdOut.trim();
+            log('[App] User data directory (trimmed):', userDataDir);
+
+            // Always use user data directory when installed
+            // Check multiple indicators
+            const nlPathCheck = typeof NL_PATH !== 'undefined' ? NL_PATH : '';
+            const isNixInstalled = nlPathCheck.includes('/nix/store/');
+
+            log('[App] NL_PATH value:', nlPathCheck);
+            log('[App] Is from Nix store:', isNixInstalled);
+
+            // ALWAYS use user directory if it's not a relative path starting with .
+            const shouldUseUserDir = isNixInstalled || !nlPathCheck.startsWith('.');
+            log('[App] Should use user directory:', shouldUseUserDir);
+
+            if (shouldUseUserDir && userDataDir && userDataDir.length > 0) {
+                log('[App] ===== UPDATING PATHS TO USER DIRECTORY =====');
+
+                const oldDbPath = DB_PATH;
+                const oldLogFile = LOG_FILE;
+
+                DB_DIR = userDataDir;
+                DB_PATH = `${userDataDir}/animals.db`;
+                LOG_DIR = userDataDir;
+                LOG_FILE = `${userDataDir}/app.log`;
+
+                log('[App] OLD DB_PATH:', oldDbPath);
+                log('[App] NEW DB_PATH:', DB_PATH);
+                log('[App] OLD LOG_FILE:', oldLogFile);
+                log('[App] NEW LOG_FILE:', LOG_FILE);
+
+                // Verify the assignment worked
+                log('[App] VERIFICATION - DB_PATH is now:', DB_PATH);
+                log('[App] VERIFICATION - DB_PATH type:', typeof DB_PATH);
+                log('[App] VERIFICATION - DB_PATH length:', DB_PATH.length);
+
+                // Create the directory
+                log('[App] Creating directory:', userDataDir);
+                const mkdirResult = await Neutralino.os.execCommand(`mkdir -p "${userDataDir}"`, {});
+                log('[App] mkdir exit code:', mkdirResult.exitCode);
+                log('[App] mkdir stdout:', mkdirResult.stdOut);
+                log('[App] mkdir stderr:', mkdirResult.stdErr);
+
+                // Show user where files are
+                const subtitle = document.getElementById('subtitle');
+                log('[App] Looking for subtitle element...');
+                if (subtitle) {
+                    log('[App] Found subtitle element, updating text');
+                    subtitle.textContent = `Data directory: ${userDataDir}`;
+                    subtitle.style.fontSize = '12px';
+                    subtitle.style.color = '#fff';
+                } else {
+                    log('[App] WARNING: subtitle element not found!');
+                }
+
+                // Show log path in footer
+                const logPathEl = document.getElementById('log-path');
+                if (logPathEl) {
+                    logPathEl.innerHTML = `
+                        <strong>📁 Debug Information</strong><br>
+                        <div style="margin: 10px 0; padding: 10px; background: rgba(255,255,255,0.1); border-radius: 6px;">
+                            <strong>Database:</strong><br>
+                            <code style="background: rgba(0,0,0,0.3); padding: 4px 8px; border-radius: 4px; font-size: 11px;">${DB_PATH}</code><br><br>
+                            <strong>Log file:</strong><br>
+                            <code style="background: rgba(0,0,0,0.3); padding: 4px 8px; border-radius: 4px; font-size: 11px;">${LOG_FILE}</code><br><br>
+                            <small style="opacity: 0.8;">To view logs in terminal: <code>tail -f ${LOG_FILE}</code></small>
+                        </div>
+                    `;
+                    log('[App] Updated footer with paths');
+                } else {
+                    log('[App] WARNING: log-path element not found!');
+                }
+            } else {
+                log('[App] Using development paths (no update needed)');
             }
+        } else {
+            log('[App] ERROR: Home command failed with exit code:', homeResult.exitCode);
         }
     } catch (err) {
-        console.error('[App] Error detecting DB path:', err);
-        console.log('[App] Using default DB path (development mode)');
+        log('[App] EXCEPTION in setupPaths:', err.message);
+        log('[App] Error name:', err.name);
+        log('[App] Error stack:', err.stack || 'No stack');
     }
-    console.log('[App] Final database path:', DB_PATH);
+
+    log('[App] ========== FINAL PATHS ==========');
+    log('[App] DB_PATH:', DB_PATH);
+    log('[App] DB_DIR:', DB_DIR);
+    log('[App] LOG_FILE:', LOG_FILE);
+    log('[App] LOG_DIR:', LOG_DIR);
+    log('[App] =====================================');
 }
 
 let animals = [];
@@ -1575,10 +1713,10 @@ async function importSelectedAnimals() {
 Neutralino.init();
 
 Neutralino.events.on('ready', async () => {
-    console.log('Neutralino app ready');
+    log('========== Neutralino app ready ==========');
 
-    // Initialize database path first
-    await getDbPathFromEnv();
+    // Setup paths first (this updates DB_PATH and LOG_FILE)
+    await setupPaths();
 
     // Initialize database if needed
     try {
