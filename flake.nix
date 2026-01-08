@@ -115,7 +115,7 @@
               --chdir "$out/lib/foster-card-generator/app" \
               --set PUPPETEER_EXECUTABLE_PATH "${pkgs.chromium}/bin/chromium" \
               --set PUPPETEER_SKIP_DOWNLOAD "1" \
-              --prefix PATH : ${pkgs.lib.makeBinPath [ pkgs.chromium pkgs.nodejs_22 ]} \
+              --prefix PATH : ${pkgs.lib.makeBinPath [ pkgs.chromium pkgs.nodejs_22 pkgs.sqlite ]} \
               --prefix NODE_PATH : "$out/lib/foster-card-generator/node_modules" \
               --prefix LD_LIBRARY_PATH : "${pkgs.lib.makeLibraryPath neutralinoLibs}"
 
