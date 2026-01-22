@@ -8,3 +8,4 @@ example page/
 result
 .env
 app/neutralinojs.log
+dist/

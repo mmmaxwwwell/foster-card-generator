@@ -123,6 +123,47 @@ To enter a development shell with all dependencies:
 nix develop
 ```
 
+## Building for Windows
+
+The project can cross-compile Windows executables from Linux using Nix and electron-builder.
+
+### Prerequisites
+
+Enter the Nix development shell which includes wine and mono for cross-compilation:
+
+```bash
+nix develop
+```
+
+### Build Windows Executables
+
+```bash
+# Install dependencies
+npm ci
+
+# Build Windows targets (NSIS installer + portable executable)
+npm run build -- --win --x64
+
+# Or build specific target only:
+npm run build -- --win nsis       # NSIS installer (.exe)
+npm run build -- --win portable   # Portable executable (.exe)
+```
+
+The built files will be in the `dist/` directory:
+- `Foster Card Generator Setup X.X.X.exe` - NSIS installer
+- `Foster Card Generator-X.X.X-portable.exe` - Portable executable
+
+### Automated Releases
+
+Windows builds are automatically created when you push a version tag:
+
+```bash
+git tag v1.0.0
+git push origin v1.0.0
+```
+
+This triggers GitHub Actions to build and publish Windows executables as release assets.
+
 ## Updating Dependencies
 
 If you need to update npm dependencies:

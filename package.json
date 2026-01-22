@@ -2,6 +2,7 @@
   "name": "foster-card-generator",
   "version": "1.0.0",
   "main": "main.js",
+  "author": "Foster Card Generator",
   "scripts": {
     "generate-cards": "mkdir -p output && node src/generate-cards.js",
     "db:migrate": "node db/migrate.js",
@@ -10,10 +11,10 @@
     "start": "electron .",
     "dev": "electron . --enable-logging",
     "build": "electron-builder",
+    "postinstall": "electron-builder install-app-deps",
     "test:scraper": "node test-scraper-integration.js",
     "test:scraper:local": "USE_LOCAL_FILE=true node test-scraper-integration.js"
   },
-  "author": "",
   "license": "ISC",
   "description": "",
   "dependencies": {
@@ -29,9 +30,46 @@
     "typescript": "^5.7.3"
   },
   "devDependencies": {
-    "@electron/rebuild": "^4.0.2",
     "@types/node": "^22.13.0",
     "electron": "^33.0.0",
     "electron-builder": "^25.0.0"
+  },
+  "build": {
+    "appId": "com.foster-card-generator.app",
+    "productName": "Foster Card Generator",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "main.js",
+      "package.json",
+      "app/**/*",
+      "src/**/*",
+      "db/schema.sql",
+      "db/migrate.js",
+      "node_modules/**/*"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        },
+        {
+          "target": "portable",
+          "arch": ["x64"]
+        }
+      ],
+      "icon": "src/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "installerIcon": "src/icon.ico",
+      "uninstallerIcon": "src/icon.ico"
+    },
+    "portable": {
+      "artifactName": "${productName}-${version}-portable.exe"
+    }
   }
 }

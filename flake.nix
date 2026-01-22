@@ -117,7 +117,7 @@
             cp -r node_modules $out/lib/foster-card-generator/
 
             # Copy icon
-            cp src/logo.png $out/share/icons/hicolor/256x256/apps/foster-card-generator.png
+            cp src/new_icon.png $out/share/icons/hicolor/256x256/apps/foster-card-generator.png
 
             # Create wrapper script that runs electron
             makeWrapper ${pkgs.electron}/bin/electron $out/bin/foster-card-generator \
@@ -173,6 +173,12 @@
               chromium
               sqlite
               electron
+              imagemagick
+              # For Windows cross-compilation with electron-builder
+              wineWowPackages.stable
+              winetricks
+              winePackages.fonts
+              mono
             ] ++ electronLibs;
             shellHook = ''
               export PUPPETEER_EXECUTABLE_PATH=${pkgs.chromium}/bin/chromium
