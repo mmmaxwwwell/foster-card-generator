@@ -665,6 +665,26 @@
 
     </div>
 
+    <!-- Rescue Selection Modal -->
+    <div id="rescueSelectModal" class="modal-overlay">
+        <div class="modal">
+            <div class="modal-header">
+                <h2>Select Rescue Organization</h2>
+                <button class="modal-close" onclick="closeRescueSelectModal()">&times;</button>
+            </div>
+            <div class="create-options">
+                <button class="option-button" onclick="selectRescue('wagtopia')">
+                    <h3>Paws Rescue League</h3>
+                    <p>Browse animals from Wagtopia</p>
+                </button>
+                <button class="option-button" onclick="selectRescue('adoptapet')">
+                    <h3>Brass City Rescue</h3>
+                    <p>Browse animals from Adoptapet</p>
+                </button>
+            </div>
+        </div>
+    </div>
+
     <!-- Create Animal Modal -->
     <div id="createModal" class="modal-overlay">
         <div class="modal">
@@ -683,7 +703,7 @@
                 </button>
                 <button class="option-button" onclick="selectCreateOption('selectFromSite')">
                     <h3>Select from Site</h3>
-                    <p>Browse and select multiple animals from Wagtopia</p>
+                    <p>Browse and select multiple animals from a rescue site</p>
                 </button>
             </div>
         </div>
@@ -791,6 +811,13 @@
                             <select id="newHousetrained" required>
                                 <option value="1" selected>Yes</option>
                                 <option value="0">No</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="newRescue">Rescue Organization</label>
+                            <select id="newRescue" required>
+                                <option value="1" selected>Paws Rescue League</option>
+                                <option value="2">Brass City Rescue</option>
                             </select>
                         </div>
                     </div>
@@ -908,6 +935,13 @@
                             <select id="housetrained" required>
                                 <option value="1">Yes</option>
                                 <option value="0">No</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="rescue">Rescue Organization</label>
+                            <select id="rescue" required>
+                                <option value="1">Paws Rescue League</option>
+                                <option value="2">Brass City Rescue</option>
                             </select>
                         </div>
                     </div>

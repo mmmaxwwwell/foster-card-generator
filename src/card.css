@@ -46,14 +46,46 @@ body {
     margin: 0 auto;
     position: relative;
     top: 0;
+    max-height: 60px;
+    max-width: 80%;
+    width: auto;
+    object-fit: contain;
+    align-self: center;
 }
 
 .business-card-front span {
     display: block;
     text-align: center;
-    padding: 10px 0;
+    padding: 0;
     width: 100%;
     box-sizing: border-box;
+}
+
+.business-card-front .name-age-row {
+    display: flex !important;
+    justify-content: center !important;
+    align-items: center;
+    gap: 15px;
+    width: 100%;
+    padding: 0;
+    margin: 0;
+    flex-grow: 0 !important;
+}
+
+.business-card-front .name-age-row .name {
+    text-align: left;
+    flex: 0 0 auto;
+    width: auto !important;
+}
+
+.business-card-front .name-age-row .age {
+    text-align: right;
+    flex: 0 0 auto;
+    width: auto !important;
+}
+
+.business-card-front .breed {
+    text-align: center;
 }
 
 .business-card-front .portrait {
@@ -68,7 +100,7 @@ body {
     max-height: 200px;
     object-fit: contain;
 }
-.business-card-front div {
+.business-card-front div:not(.name-age-row) {
     flex-grow: 1;
     display: flex;
     align-items: center;

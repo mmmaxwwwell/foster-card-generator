@@ -10,10 +10,14 @@
     <div id="page" class="no-space">
         {{#each cards}}
         <div id="card-front{{@index}}" class="business-card business-card-front">
-            <img src="./logo.png" alt="Paws Rescue League Logo" class="logo no-space">
-            <span class="no-space">www.pawsrescueleague.org</span>
+            <img src="./{{../rescueLogo}}" alt="{{../rescueName}} Logo" class="logo no-space">
+            <span class="no-space">{{../rescueWebsite}}</span>
             <img src="images/{{../portraitPath}}" alt="Portrait" class="portrait no-space ">
-            <span class="no-space">{{../name}}<br>{{../ageShort}} {{../breed}}</span>
+            <div class="name-age-row">
+                <span class="name">{{../name}}</span>
+                <span class="age">{{../ageShort}}</span>
+            </div>
+            <span class="breed">{{../breed}}</span>
         </div>
         {{/each}}
     </div>

@@ -34,12 +34,30 @@ try {
 // Use IPC to call scraper in main process (puppeteer doesn't work well in renderer)
 const { ipcRenderer } = require('electron');
 
-async function scrapeAnimalPage(url) {
-    const result = await ipcRenderer.invoke('scrape-animal-page', url);
+// Current selected rescue target
+let selectedRescue = 'wagtopia'; // 'wagtopia' or 'adoptapet'
+
+async function scrapeAnimalPageWagtopia(url) {
+    const result = await ipcRenderer.invoke('scrape-animal-page-wagtopia', url);
     if (!result.success) {
         throw new Error(result.error);
     }
     return result.data;
+}
+
+async function scrapeAnimalPageAdoptapet(url) {
+    const result = await ipcRenderer.invoke('scrape-animal-page-adoptapet', url);
+    if (!result.success) {
+        throw new Error(result.error);
+    }
+    return result.data;
+}
+
+async function scrapeAnimalPage(url) {
+    if (selectedRescue === 'adoptapet') {
+        return scrapeAnimalPageAdoptapet(url);
+    }
+    return scrapeAnimalPageWagtopia(url);
 }
 
 // App path (equivalent to NL_PATH)
@@ -175,6 +193,7 @@ async function setupPaths() {
 }
 
 let animals = [];
+let rescues = []; // Cache of rescue organizations
 let currentAnimal = null;
 let pendingImageData = null; // Stores new image data before save
 let newAnimalImageData = null; // Stores image data for new animal
@@ -277,6 +296,10 @@ async function loadAnimals() {
     }
 
     try {
+        // Load rescues for later use
+        rescues = db.getAllRescues();
+        console.log('[App] Loaded', rescues.length, 'rescues');
+
         animals = db.getAllAnimals();
 
         if (animals.length === 0) {
@@ -312,6 +335,21 @@ async function loadAnimals() {
     }
 }
 
+// Rescue Selection Modal functions
+function openRescueSelectModal() {
+    document.getElementById('rescueSelectModal').classList.add('active');
+}
+
+function closeRescueSelectModal() {
+    document.getElementById('rescueSelectModal').classList.remove('active');
+}
+
+function selectRescue(rescue) {
+    selectedRescue = rescue;
+    closeRescueSelectModal();
+    openSelectFromSiteModal();
+}
+
 // Create Animal Modal functions
 function openCreateModal() {
     document.getElementById('createModal').classList.add('active');
@@ -329,7 +367,7 @@ function selectCreateOption(option) {
     } else if (option === 'scrape') {
         openScrapeModal();
     } else if (option === 'selectFromSite') {
-        openSelectFromSiteModal();
+        openRescueSelectModal();
     }
 }
 
@@ -619,7 +657,8 @@ async function createAnimal() {
         housetrained: document.getElementById('newHousetrained').value === '1',
         kids: document.getElementById('newKids').value,
         dogs: document.getElementById('newDogs').value,
-        cats: document.getElementById('newCats').value
+        cats: document.getElementById('newCats').value,
+        rescue_id: parseInt(document.getElementById('newRescue').value, 10)
     };
 
     try {
@@ -679,6 +718,9 @@ function openEditModal(animalId) {
 
     const catsVal = String(currentAnimal.cats);
     document.getElementById('cats').value = catsVal === '1' ? '1' : catsVal === '0' ? '0' : '?';
+
+    // Set rescue organization
+    document.getElementById('rescue').value = currentAnimal.rescue_id || 1;
 }
 
 function closeModal() {
@@ -802,7 +844,8 @@ async function saveAnimal() {
         housetrained: document.getElementById('housetrained').value === '1',
         kids: document.getElementById('kids').value,
         dogs: document.getElementById('dogs').value,
-        cats: document.getElementById('cats').value
+        cats: document.getElementById('cats').value,
+        rescue_id: parseInt(document.getElementById('rescue').value, 10)
     };
 
     try {
@@ -963,6 +1006,7 @@ async function printSelectedAnimals() {
 document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
         closeModal();
+        closeRescueSelectModal();
         closeCreateModal();
         closeManualEntryModal();
         closeScrapeModal();
@@ -973,6 +1017,12 @@ document.addEventListener('keydown', (e) => {
 });
 
 // Close modal when clicking outside
+document.getElementById('rescueSelectModal').addEventListener('click', (e) => {
+    if (e.target.classList.contains('modal-overlay')) {
+        closeRescueSelectModal();
+    }
+});
+
 document.getElementById('createModal').addEventListener('click', (e) => {
     if (e.target.classList.contains('modal-overlay')) {
         closeCreateModal();
@@ -1170,14 +1220,29 @@ async function openSelectFromSiteModal() {
     const container = document.getElementById('animalListContainer');
     const importButton = document.getElementById('importButton');
 
-    container.innerHTML = '<div class="loading-spinner">Loading animals from Wagtopia</div>';
+    // Determine which rescue site to use
+    const rescueName = selectedRescue === 'adoptapet' ? 'Brass City Rescue (Adoptapet)' : 'Paws Rescue League (Wagtopia)';
+    container.innerHTML = `<div class="loading-spinner">Loading animals from ${rescueName}</div>`;
     importButton.disabled = true;
 
     try {
-        // Call the scraper script to get the list of animals
-        const url = 'https://www.wagtopia.com/search/org?id=1841035';
-        const command = `node scrape-list.js "${url.replace(/"/g, '\\"')}"`;
-        console.log('[App] Executing list scraper command');
+        // Get the rescue info from the database based on selected rescue type
+        const rescue = db.getRescueByScraperType(selectedRescue);
+        if (!rescue) {
+            throw new Error(`Rescue not found for scraper type: ${selectedRescue}`);
+        }
+        console.log('[App] Using rescue:', rescue.name, 'org_id:', rescue.org_id);
+
+        // Call the appropriate scraper script based on selected rescue
+        let scriptName;
+        if (selectedRescue === 'adoptapet') {
+            scriptName = 'scrape-list-adoptapet.js';
+        } else {
+            scriptName = 'scrape-list-wagtopia.js';
+        }
+        // Pass the org_id directly to the scraper (it will build the URL)
+        const command = `node ${scriptName} "${rescue.org_id}"`;
+        console.log('[App] Executing list scraper command:', command);
 
         const result = await execAsync(command, { cwd: path.join(APP_PATH, 'app') });
 
@@ -1355,6 +1420,10 @@ async function importSelectedAnimals() {
                     }
                 }
 
+                // Get the rescue_id for the current selected rescue
+                const currentRescue = db.getRescueByScraperType(selectedRescue);
+                const rescueId = currentRescue ? currentRescue.id : 1;
+
                 // Insert into database
                 const animalData = {
                     name: scrapedData.name,
@@ -1368,7 +1437,8 @@ async function importSelectedAnimals() {
                     housetrained: scrapedData.housetrained,
                     kids: scrapedData.kids,
                     dogs: scrapedData.dogs,
-                    cats: scrapedData.cats
+                    cats: scrapedData.cats,
+                    rescue_id: rescueId
                 };
 
                 db.createAnimal(animalData, imageData);
@@ -1539,6 +1609,10 @@ async function printCardFront(animalId) {
             console.log('[App] No imageDataUrl available');
         }
 
+        // Get rescue info for this animal
+        const rescue = db.getRescueById(animal.rescue_id || 1);
+        console.log('[App] Using rescue:', rescue ? rescue.name : 'default');
+
         // Prepare parameters for card generation
         const params = {
             name: animal.name,
@@ -1554,7 +1628,10 @@ async function printCardFront(animalId) {
             cats: animal.cats,
             slug: animal.slug,
             portraitPath: animal.portrait_path || 'portrait.jpg',
-            portraitFilePath: portraitFilePath
+            portraitFilePath: portraitFilePath,
+            rescueName: rescue ? rescue.name : 'Paws Rescue League',
+            rescueWebsite: rescue ? rescue.website : 'pawsrescueleague.org',
+            rescueLogo: rescue ? rescue.logo_path : 'logo.png'
         };
 
         console.log('[App] Parameters prepared:', JSON.stringify({...params}));
@@ -1639,6 +1716,10 @@ async function printCardBack(animalId) {
             console.log('[App] No imageDataUrl available');
         }
 
+        // Get rescue info for this animal
+        const rescue = db.getRescueById(animal.rescue_id || 1);
+        console.log('[App] Using rescue:', rescue ? rescue.name : 'default');
+
         // Prepare parameters for card generation
         const params = {
             name: animal.name,
@@ -1654,7 +1735,10 @@ async function printCardBack(animalId) {
             cats: animal.cats,
             slug: animal.slug,
             portraitPath: animal.portrait_path || 'portrait.jpg',
-            portraitFilePath: portraitFilePath
+            portraitFilePath: portraitFilePath,
+            rescueName: rescue ? rescue.name : 'Paws Rescue League',
+            rescueWebsite: rescue ? rescue.website : 'pawsrescueleague.org',
+            rescueLogo: rescue ? rescue.logo_path : 'logo.png'
         };
 
         console.log('[App] Parameters prepared:', JSON.stringify({...params}));

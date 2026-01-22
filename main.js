@@ -4,8 +4,9 @@ const fs = require('fs');
 const os = require('os');
 const { exec } = require('child_process');
 
-// Load scraper in main process where puppeteer works properly
-const { scrapeAnimalPage } = require('./app/scrape-url.js');
+// Load scrapers in main process where puppeteer works properly
+const { scrapeAnimalPage: scrapeWagtopia } = require('./app/scrape-url-wagtopia.js');
+const { scrapeAnimalPage: scrapeAdoptapet } = require('./app/scrape-url-adoptapet.js');
 
 // Keep a global reference of the window object
 let mainWindow;
@@ -60,10 +61,20 @@ app.on('window-all-closed', () => {
     }
 });
 
-// IPC handler for scraping URLs
-ipcMain.handle('scrape-animal-page', async (event, url) => {
+// IPC handler for scraping URLs (Wagtopia)
+ipcMain.handle('scrape-animal-page-wagtopia', async (event, url) => {
     try {
-        const result = await scrapeAnimalPage(url);
+        const result = await scrapeWagtopia(url);
+        return { success: true, data: result };
+    } catch (error) {
+        return { success: false, error: error.message };
+    }
+});
+
+// IPC handler for scraping URLs (Adoptapet)
+ipcMain.handle('scrape-animal-page-adoptapet', async (event, url) => {
+    try {
+        const result = await scrapeAdoptapet(url);
         return { success: true, data: result };
     } catch (error) {
         return { success: false, error: error.message };

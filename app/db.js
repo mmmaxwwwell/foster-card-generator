@@ -81,6 +81,29 @@ function initialize() {
  * Ensure database schema exists
  */
 function ensureSchema() {
+    // Check if rescues table exists
+    const rescuesExists = db.prepare(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='rescues'"
+    ).get();
+
+    if (!rescuesExists) {
+        db.exec(`
+            CREATE TABLE IF NOT EXISTS rescues (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                website TEXT NOT NULL,
+                logo_path TEXT NOT NULL,
+                org_id TEXT,
+                scraper_type TEXT NOT NULL,
+                created_at TEXT DEFAULT (datetime('now'))
+            );
+
+            INSERT OR IGNORE INTO rescues (id, name, website, logo_path, org_id, scraper_type) VALUES
+                (1, 'Paws Rescue League', 'pawsrescueleague.org', 'logo.png', '1841035', 'wagtopia'),
+                (2, 'Brass City Rescue', 'brasscityrescuealliance.org', 'brass-city-logo.jpg', '87063', 'adoptapet');
+        `);
+    }
+
     const tableExists = db.prepare(
         "SELECT name FROM sqlite_master WHERE type='table' AND name='animals'"
     ).get();
@@ -104,11 +127,14 @@ function ensureSchema() {
                 portrait_path TEXT,
                 portrait_data BLOB,
                 portrait_mime TEXT,
+                rescue_id INTEGER DEFAULT 1,
                 created_at TEXT DEFAULT (datetime('now')),
-                updated_at TEXT DEFAULT (datetime('now'))
+                updated_at TEXT DEFAULT (datetime('now')),
+                FOREIGN KEY (rescue_id) REFERENCES rescues(id)
             );
 
             CREATE INDEX IF NOT EXISTS idx_animals_name ON animals(name);
+            CREATE INDEX IF NOT EXISTS idx_animals_rescue ON animals(rescue_id);
 
             CREATE TRIGGER IF NOT EXISTS update_animals_timestamp
             AFTER UPDATE ON animals
@@ -118,6 +144,15 @@ function ensureSchema() {
         `);
         return true; // Schema was created
     }
+
+    // Check if rescue_id column exists, add it if not (migration for existing databases)
+    const columns = db.prepare("PRAGMA table_info(animals)").all();
+    const hasRescueId = columns.some(col => col.name === 'rescue_id');
+    if (!hasRescueId) {
+        db.exec(`ALTER TABLE animals ADD COLUMN rescue_id INTEGER DEFAULT 1`);
+        console.log('[DB] Added rescue_id column to existing animals table');
+    }
+
     return false; // Schema already existed
 }
 
@@ -172,7 +207,7 @@ function getAllAnimals() {
     return queryAll(`
         SELECT id, name, slug, size, shots, housetrained, breed,
                age_long, age_short, gender, kids, dogs, cats,
-               portrait_path, portrait_mime
+               portrait_path, portrait_mime, rescue_id
         FROM animals
         ORDER BY name
     `);
@@ -188,7 +223,7 @@ function getAnimalById(id) {
     return db.prepare(`
         SELECT id, name, slug, size, shots, housetrained, breed,
                age_long, age_short, gender, kids, dogs, cats,
-               portrait_path, portrait_mime
+               portrait_path, portrait_mime, rescue_id
         FROM animals
         WHERE id = ?
     `).get(id);
@@ -224,13 +259,15 @@ function getImageAsDataUrl(animalId) {
 function createAnimal(animal, imageData = null) {
     if (!db) throw new Error('Database not initialized');
 
+    const rescueId = animal.rescue_id || 1;
+
     if (imageData) {
         const stmt = db.prepare(`
             INSERT INTO animals (
                 name, breed, slug, age_long, age_short, size, gender,
                 shots, housetrained, kids, dogs, cats,
-                portrait_path, portrait_mime, portrait_data
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                portrait_path, portrait_mime, portrait_data, rescue_id
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `);
 
         // Convert hex string to buffer for the BLOB
@@ -251,14 +288,15 @@ function createAnimal(animal, imageData = null) {
             animal.cats,
             imageData.path,
             imageData.mime,
-            imageBuffer
+            imageBuffer,
+            rescueId
         );
     } else {
         const stmt = db.prepare(`
             INSERT INTO animals (
                 name, breed, slug, age_long, age_short, size, gender,
-                shots, housetrained, kids, dogs, cats
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                shots, housetrained, kids, dogs, cats, rescue_id
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `);
 
         return stmt.run(
@@ -273,7 +311,8 @@ function createAnimal(animal, imageData = null) {
             animal.housetrained ? 1 : 0,
             animal.kids,
             animal.dogs,
-            animal.cats
+            animal.cats,
+            rescueId
         );
     }
 }
@@ -288,13 +327,15 @@ function createAnimal(animal, imageData = null) {
 function updateAnimal(id, animal, imageData = null) {
     if (!db) throw new Error('Database not initialized');
 
+    const rescueId = animal.rescue_id || 1;
+
     if (imageData) {
         const stmt = db.prepare(`
             UPDATE animals SET
                 name = ?, breed = ?, slug = ?, age_long = ?, age_short = ?,
                 size = ?, gender = ?, shots = ?, housetrained = ?,
                 kids = ?, dogs = ?, cats = ?,
-                portrait_path = ?, portrait_mime = ?, portrait_data = ?
+                portrait_path = ?, portrait_mime = ?, portrait_data = ?, rescue_id = ?
             WHERE id = ?
         `);
 
@@ -317,6 +358,7 @@ function updateAnimal(id, animal, imageData = null) {
             imageData.path,
             imageData.mime,
             imageBuffer,
+            rescueId,
             id
         );
     } else {
@@ -324,7 +366,7 @@ function updateAnimal(id, animal, imageData = null) {
             UPDATE animals SET
                 name = ?, breed = ?, slug = ?, age_long = ?, age_short = ?,
                 size = ?, gender = ?, shots = ?, housetrained = ?,
-                kids = ?, dogs = ?, cats = ?
+                kids = ?, dogs = ?, cats = ?, rescue_id = ?
             WHERE id = ?
         `);
 
@@ -341,6 +383,7 @@ function updateAnimal(id, animal, imageData = null) {
             animal.kids,
             animal.dogs,
             animal.cats,
+            rescueId,
             id
         );
     }
@@ -385,6 +428,50 @@ function deleteAnimals(ids) {
     return { successCount, failCount };
 }
 
+// ============================================================
+// Rescue Operations
+// ============================================================
+
+/**
+ * Get all rescues
+ * @returns {Array} - Array of rescue objects
+ */
+function getAllRescues() {
+    return queryAll(`
+        SELECT id, name, website, logo_path, org_id, scraper_type
+        FROM rescues
+        ORDER BY name
+    `);
+}
+
+/**
+ * Get a rescue by ID
+ * @param {number} id - Rescue ID
+ * @returns {Object|undefined} - Rescue object or undefined
+ */
+function getRescueById(id) {
+    if (!db) throw new Error('Database not initialized');
+    return db.prepare(`
+        SELECT id, name, website, logo_path, org_id, scraper_type
+        FROM rescues
+        WHERE id = ?
+    `).get(id);
+}
+
+/**
+ * Get a rescue by scraper type
+ * @param {string} scraperType - Scraper type ('wagtopia' or 'adoptapet')
+ * @returns {Object|undefined} - Rescue object or undefined
+ */
+function getRescueByScraperType(scraperType) {
+    if (!db) throw new Error('Database not initialized');
+    return db.prepare(`
+        SELECT id, name, website, logo_path, org_id, scraper_type
+        FROM rescues
+        WHERE scraper_type = ?
+    `).get(scraperType);
+}
+
 // Export all functions
 module.exports = {
     // Connection management
@@ -406,5 +493,10 @@ module.exports = {
     createAnimal,
     updateAnimal,
     deleteAnimal,
-    deleteAnimals
+    deleteAnimals,
+
+    // Rescue operations
+    getAllRescues,
+    getRescueById,
+    getRescueByScraperType
 };

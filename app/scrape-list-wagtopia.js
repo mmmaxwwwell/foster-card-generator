@@ -245,9 +245,20 @@ async function scrapeAnimalList(url) {
     }
 }
 
+/**
+ * Build the Wagtopia organization URL from an org ID
+ * @param {string} orgId - The organization ID
+ * @returns {string} - The full URL
+ */
+function buildOrgUrl(orgId) {
+    return `https://www.wagtopia.com/search/org?id=${orgId}&iframe=normal`;
+}
+
 // CLI interface
 if (require.main === module) {
-    const url = process.argv[2] || 'https://www.wagtopia.com/search/org?id=1841035&iframe=normal';
+    // Accept either a full URL or just an org ID
+    const arg = process.argv[2] || '1841035';
+    const url = arg.startsWith('http') ? arg : buildOrgUrl(arg);
 
     scrapeAnimalList(url)
         .then(animals => {
@@ -261,4 +272,4 @@ if (require.main === module) {
         });
 }
 
-module.exports = { scrapeAnimalList };
+module.exports = { scrapeAnimalList, buildOrgUrl };

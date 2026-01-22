@@ -26,10 +26,10 @@ async function createTempDir(params) {
                 // Copy necessary assets
                 const srcDir = path.join(__dirname, '..', 'src');
                 console.log('[Card Gen] Source directory:', srcDir);
-                const assets = ['card.css', 'logo.png', 'qr.svg', 'qrcode.min.js'];
+                const baseAssets = ['card.css', 'qr.svg', 'qrcode.min.js'];
 
                 Promise.all(
-                    assets.map(asset => {
+                    baseAssets.map(asset => {
                         const srcPath = path.join(srcDir, asset);
                         const destPath = path.join(tmpPath, asset);
                         console.log(`[Card Gen] Copying ${asset} from ${srcPath} to ${destPath}`);
@@ -37,7 +37,14 @@ async function createTempDir(params) {
                     })
                 )
                 .then(async () => {
-                    console.log('[Card Gen] All assets copied successfully');
+                    console.log('[Card Gen] Base assets copied successfully');
+
+                    // Copy the rescue logo (use rescueLogo param or default to logo.png)
+                    const logoFilename = params.rescueLogo || 'logo.png';
+                    const logoSrcPath = path.join(srcDir, logoFilename);
+                    const logoDestPath = path.join(tmpPath, logoFilename);
+                    console.log(`[Card Gen] Copying rescue logo ${logoFilename} from ${logoSrcPath} to ${logoDestPath}`);
+                    await fs.copyFile(logoSrcPath, logoDestPath);
                     // Copy the portrait image from file path or write from base64 data
                     if (params.portraitFilePath) {
                         console.log('[Card Gen] Copying portrait from file path:', params.portraitFilePath);
