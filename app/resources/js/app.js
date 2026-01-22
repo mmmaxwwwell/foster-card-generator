@@ -1,9 +1,60 @@
-// Logging system - write to user's home directory
+// Logging system - declare early to avoid TDZ issues if requires fail
+const logMessages = [];
+let loggingReady = false;
 let LOG_DIR = null;
 let LOG_FILE = null;
 let TMP_DIR = null;
-const logMessages = [];
-let loggingReady = false;
+
+// Node.js modules for Electron
+const fs = require('fs');
+const path = require('path');
+const os = require('os');
+const { exec } = require('child_process');
+const { promisify } = require('util');
+const execAsync = promisify(exec);
+
+// Try to load better-sqlite3, but handle if it fails (e.g., native module mismatch)
+let Database = null;
+let databaseLoadError = null;
+try {
+    Database = require('better-sqlite3');
+} catch (err) {
+    databaseLoadError = err;
+    console.error('[App] Failed to load better-sqlite3:', err.message);
+}
+
+// Database connection (initialized in setupPaths)
+let db = null;
+
+// Import card generation functions directly (no need to spawn subprocess)
+let generateCardFront = null;
+let generateCardBack = null;
+try {
+    const cardGen = require('../generate-card-cli.js');
+    console.log('[App] cardGen module loaded:', cardGen);
+    console.log('[App] cardGen keys:', Object.keys(cardGen));
+    console.log('[App] generateCardBack type:', typeof cardGen.generateCardBack);
+    generateCardFront = cardGen.generateCardFront;
+    generateCardBack = cardGen.generateCardBack;
+} catch (err) {
+    console.error('[App] Failed to load card generation module:', err.message);
+    console.error('[App] Full error:', err);
+    console.error('[App] Stack:', err.stack);
+}
+
+// Use IPC to call scraper in main process (puppeteer doesn't work well in renderer)
+const { ipcRenderer } = require('electron');
+
+async function scrapeAnimalPage(url) {
+    const result = await ipcRenderer.invoke('scrape-animal-page', url);
+    if (!result.success) {
+        throw new Error(result.error);
+    }
+    return result.data;
+}
+
+// App path (equivalent to NL_PATH)
+const APP_PATH = path.join(__dirname, '..', '..');
 
 async function writeToLogFile(message) {
     // Don't try to write until LOG_FILE is set and directory exists
@@ -18,12 +69,12 @@ async function writeToLogFile(message) {
         // Try to append to the log file
         let content = '';
         try {
-            content = await Neutralino.filesystem.readFile(LOG_FILE);
+            content = fs.readFileSync(LOG_FILE, 'utf8');
         } catch (e) {
             // File doesn't exist yet
         }
 
-        await Neutralino.filesystem.writeFile(LOG_FILE, content + logLine);
+        fs.writeFileSync(LOG_FILE, content + logLine);
     } catch (err) {
         // Silently fail - can't do much if logging fails
         console.error('Log write failed:', err);
@@ -52,7 +103,7 @@ async function openLogFile() {
         log('[App] Opening log file:', LOG_FILE);
 
         // Try to open with default text editor
-        await Neutralino.os.execCommand(`xdg-open "${LOG_FILE}"`, {});
+        exec(`xdg-open "${LOG_FILE}"`, {});
         showToast('Opening log file...');
     } catch (err) {
         console.error('[App] Failed to open log file:', err);
@@ -81,84 +132,62 @@ async function setupPaths() {
     log('[App] ========== FORCING USER HOME DIRECTORY ==========');
 
     try {
-        // Get home directory using multiple methods for reliability
-        let homeDir = null;
-
-        // Try to get HOME from environment
-        try {
-            const envResult = await Neutralino.os.getEnv('HOME');
-            if (envResult) {
-                homeDir = envResult;
-                log('[App] Got HOME from getEnv:', homeDir);
-            }
-        } catch (envErr) {
-            log('[App] getEnv failed:', envErr.message);
-        }
-
-        // Fallback: use shell to expand ~
-        if (!homeDir) {
-            const homeResult = await Neutralino.os.execCommand('eval echo ~', {});
-            if (homeResult.exitCode === 0 && homeResult.stdOut.trim()) {
-                homeDir = homeResult.stdOut.trim();
-                log('[App] Got HOME from shell:', homeDir);
-            }
-        }
+        // Get home directory
+        const homeDir = os.homedir();
+        log('[App] Got HOME from os.homedir():', homeDir);
 
         if (!homeDir) {
             throw new Error('Could not determine HOME directory');
         }
 
-        const userDataDir = `${homeDir}/.local/share/foster-card-generator`;
+        const userDataDir = path.join(homeDir, '.local', 'share', 'foster-card-generator');
         log('[App] Using directory:', userDataDir);
 
         // FORCE these paths
         DB_DIR = userDataDir;
-        DB_PATH = `${userDataDir}/animals.db`;
+        DB_PATH = path.join(userDataDir, 'animals.db');
         LOG_DIR = userDataDir;
-        LOG_FILE = `${userDataDir}/app.log`;
-        TMP_DIR = `${userDataDir}/tmp`;
+        LOG_FILE = path.join(userDataDir, 'app.log');
+        TMP_DIR = path.join(userDataDir, 'tmp');
 
         log('[App] DB_PATH set to:', DB_PATH);
         log('[App] LOG_FILE set to:', LOG_FILE);
 
-        // Create the directory structure using Neutralino's filesystem API
-        // First ensure ~/.local exists
-        const localDir = `${homeDir}/.local`;
-        const shareDir = `${homeDir}/.local/share`;
+        // Create the directory structure
+        const dirsToCreate = [
+            path.join(homeDir, '.local'),
+            path.join(homeDir, '.local', 'share'),
+            userDataDir,
+            TMP_DIR
+        ];
 
-        try {
-            await Neutralino.filesystem.createDirectory(localDir);
-            log('[App] Created .local directory');
-        } catch (e) {
-            // Directory might already exist, that's fine
-            log('[App] .local directory exists or error:', e.message);
-        }
-
-        try {
-            await Neutralino.filesystem.createDirectory(shareDir);
-            log('[App] Created .local/share directory');
-        } catch (e) {
-            // Directory might already exist, that's fine
-            log('[App] .local/share directory exists or error:', e.message);
-        }
-
-        try {
-            await Neutralino.filesystem.createDirectory(userDataDir);
-            log('[App] Created foster-card-generator directory');
-        } catch (e) {
-            // Directory might already exist, that's fine
-            log('[App] foster-card-generator directory exists or error:', e.message);
-        }
-
-        try {
-            await Neutralino.filesystem.createDirectory(TMP_DIR);
-            log('[App] Created tmp directory');
-        } catch (e) {
-            // Directory might already exist, that's fine
-            log('[App] tmp directory exists or error:', e.message);
+        for (const dir of dirsToCreate) {
+            try {
+                fs.mkdirSync(dir, { recursive: true });
+                log('[App] Created directory:', dir);
+            } catch (e) {
+                log('[App] Directory exists or error:', dir, e.message);
+            }
         }
 
         log('[App] Directory setup complete');
+
+        // Initialize SQLite database connection
+        if (!Database) {
+            const errMsg = databaseLoadError
+                ? `better-sqlite3 failed to load: ${databaseLoadError.message}`
+                : 'better-sqlite3 module not available';
+            log('[App] ERROR:', errMsg);
+            throw new Error(errMsg);
+        }
+        try {
+            db = new Database(DB_PATH);
+            db.pragma('journal_mode = WAL');
+            log('[App] SQLite database connection established');
+        } catch (dbErr) {
+            log('[App] ERROR: Failed to initialize SQLite database:', dbErr.message);
+            throw new Error(`Failed to open database at ${DB_PATH}: ${dbErr.message}`);
+        }
 
         // Enable file logging now that paths are set
         loggingReady = true;
@@ -202,21 +231,20 @@ let pendingImageData = null; // Stores new image data before save
 let newAnimalImageData = null; // Stores image data for new animal
 
 // Check if database exists and initialize if needed
-async function initializeDatabase() {
+function initializeDatabase() {
     try {
         console.log('[App] Checking if database exists...');
 
-        // Try to query the animals table to see if it exists
-        const result = await Neutralino.os.execCommand(
-            `sqlite3 "${DB_PATH}" "SELECT name FROM sqlite_master WHERE type='table' AND name='animals';"`,
-            { cwd: NL_PATH }
-        );
+        // Check if the animals table exists
+        const tableExists = db.prepare(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='animals'"
+        ).get();
 
-        if (result.exitCode !== 0 || !result.stdOut.trim()) {
+        if (!tableExists) {
             console.log('[App] Database or animals table not found. Initializing...');
 
             // Create the animals table schema
-            const schema = `
+            db.exec(`
                 CREATE TABLE IF NOT EXISTS animals (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     name TEXT NOT NULL,
@@ -245,27 +273,7 @@ async function initializeDatabase() {
                 BEGIN
                     UPDATE animals SET updated_at = datetime('now') WHERE id = NEW.id;
                 END;
-            `;
-
-            // Write schema to temp file and execute
-            const tmpFile = `${TMP_DIR}/init-schema.sql`;
-            await Neutralino.filesystem.writeFile(tmpFile, schema);
-
-            const initResult = await Neutralino.os.execCommand(
-                `sqlite3 "${DB_PATH}" < "${tmpFile}"`,
-                { cwd: NL_PATH }
-            );
-
-            // Clean up temp file
-            try {
-                await Neutralino.filesystem.removeFile(tmpFile);
-            } catch (cleanupErr) {
-                console.warn('[App] Could not delete temp schema file:', cleanupErr);
-            }
-
-            if (initResult.exitCode !== 0) {
-                throw new Error('Failed to initialize database: ' + initResult.stdErr);
-            }
+            `);
 
             console.log('[App] Database initialized successfully (no data seeded)');
             return true; // Database was created
@@ -279,81 +287,38 @@ async function initializeDatabase() {
     }
 }
 
-async function runSQL(sql) {
+function runSQL(sql) {
     try {
-        // Use stdin to avoid command line length limits with large image data
-        // Create a temporary file with the SQL
-        const tmpFile = `${TMP_DIR}/sql-${Date.now()}.sql`;
-        await Neutralino.filesystem.writeFile(tmpFile, sql);
-
-        const result = await Neutralino.os.execCommand(
-            `sqlite3 "${DB_PATH}" < "${tmpFile}"`,
-            { cwd: NL_PATH }
-        );
-
-        // Clean up temp file
-        try {
-            await Neutralino.filesystem.removeFile(tmpFile);
-        } catch (cleanupErr) {
-            console.warn('[App] Could not delete temp SQL file:', cleanupErr);
-        }
-
-        if (result.exitCode !== 0) {
-            throw new Error(result.stdErr || 'Database query failed');
-        }
-
-        return result.stdOut;
+        db.exec(sql);
     } catch (err) {
         console.error('Database error:', err);
         throw err;
     }
 }
 
-async function queryDatabase(sql) {
+function queryDatabase(sql) {
     try {
-        const result = await Neutralino.os.execCommand(
-            `sqlite3 -json "${DB_PATH}" "${sql.replace(/"/g, '\\"')}"`,
-            { cwd: NL_PATH }
-        );
-
-        if (result.exitCode !== 0) {
-            throw new Error(result.stdErr || 'Database query failed');
-        }
-
-        if (!result.stdOut.trim()) {
-            return [];
-        }
-
-        return JSON.parse(result.stdOut);
+        const stmt = db.prepare(sql);
+        return stmt.all();
     } catch (err) {
         console.error('Database error:', err);
         throw err;
     }
 }
 
-async function getImageAsDataUrl(animalId) {
+function getImageAsDataUrl(animalId) {
     try {
-        const result = await Neutralino.os.execCommand(
-            `sqlite3 "${DB_PATH}" "SELECT portrait_mime, hex(portrait_data) FROM animals WHERE id = ${animalId};"`,
-            { cwd: NL_PATH }
-        );
+        const row = db.prepare(
+            'SELECT portrait_mime, portrait_data FROM animals WHERE id = ?'
+        ).get(animalId);
 
-        if (result.exitCode !== 0 || !result.stdOut.trim()) {
+        if (!row || !row.portrait_mime || !row.portrait_data) {
             return null;
         }
 
-        const [mime, hexData] = result.stdOut.trim().split('|');
-        if (!mime || !hexData) return null;
-
-        // Convert hex to base64 in chunks to avoid call stack overflow
-        let binary = '';
-        for (let i = 0; i < hexData.length; i += 2) {
-            const byte = parseInt(hexData.substr(i, 2), 16);
-            binary += String.fromCharCode(byte);
-        }
-        const base64 = btoa(binary);
-
-        return `data:${mime};base64,${base64}`;
+        // portrait_data is a Buffer in better-sqlite3, convert to base64
+        const base64 = row.portrait_data.toString('base64');
+        return `data:${row.portrait_mime};base64,${base64}`;
     } catch (err) {
         console.error('Error loading image:', err);
         return null;
@@ -442,12 +407,32 @@ async function loadAnimals() {
 
     content.innerHTML = '<div class="loading">Loading animals...</div>';
 
+    // Ensure database is initialized
+    if (!db) {
+        console.log('[App] Database not initialized, running setupPaths...');
+        try {
+            await setupPaths();
+            await initializeDatabase();
+        } catch (err) {
+            console.error('[App] Failed to initialize database:', err);
+            content.innerHTML = `
+                <div class="error">
+                    <h3>Database not initialized</h3>
+                    <p>${err.message}</p>
+                    <p>Please restart the application.</p>
+                </div>
+            `;
+            subtitle.textContent = 'Error: Database not ready';
+            return;
+        }
+    }
+
     try {
         const sql = `SELECT id, name, slug, size, shots, housetrained, breed,
                      age_long, age_short, gender, kids, dogs, cats,
                      portrait_path, portrait_mime FROM animals ORDER BY name`;
 
-        animals = await queryDatabase(sql);
+        animals = queryDatabase(sql);
 
         if (animals.length === 0) {
             content.innerHTML = '<div class="loading">No animals found. Run the migration first.</div>';
@@ -525,30 +510,13 @@ async function scrapeUrl() {
         showToast('Scraping data from URL...', 'success');
         console.log('[App] Starting scrape for URL:', url);
 
-        // Call the scraper script
-        const command = `node scrape-url.js "${url.replace(/"/g, '\\"')}"`;
-        console.log('[App] Executing scraper command');
-
-        const result = await Neutralino.os.execCommand(command, { cwd: NL_PATH });
-
-        console.log('[App] Scraper exit code:', result.exitCode);
-
-        // Log stderr (debug messages from scraper)
-        if (result.stdErr) {
-            const lines = result.stdErr.split('\n');
-            for (const line of lines) {
-                if (line.trim()) {
-                    console.log('[Scraper]', line);
-                }
-            }
+        if (!scrapeAnimalPage) {
+            throw new Error('Scraper module not loaded');
         }
 
-        if (result.exitCode !== 0) {
-            throw new Error(result.stdErr || 'Scraping failed');
-        }
-
-        // Parse the scraped data from stdout
-        const scrapedData = JSON.parse(result.stdOut.trim());
+        // Call the scraper directly
+        const scrapedData = await scrapeAnimalPage(url);
+        console.log('[App] Scraper completed');
         console.log('[App] Scraped data:', scrapedData);
 
         // Close scrape modal
@@ -557,14 +525,14 @@ async function scrapeUrl() {
         // Load image if available
         if (scrapedData.imagePath) {
             try {
-                // Convert relative path to absolute path (relative to NL_PATH)
+                // Convert relative path to absolute path (relative to APP_PATH)
                 const imagePath = scrapedData.imagePath.startsWith('/')
                     ? scrapedData.imagePath
-                    : `${NL_PATH}/${scrapedData.imagePath}`;
+                    : path.join(APP_PATH, scrapedData.imagePath);
                 console.log('[App] Loading scraped image from:', imagePath);
 
                 // Read the image file
-                const data = await Neutralino.filesystem.readBinaryFile(imagePath);
+                const data = fs.readFileSync(imagePath);
 
                 // Determine MIME type
                 const ext = imagePath.split('.').pop().toLowerCase();
@@ -578,25 +546,20 @@ async function scrapeUrl() {
                 const mime = mimeTypes[ext] || 'image/jpeg';
 
                 // Convert to hex for database
-                const uint8Array = new Uint8Array(data);
                 let hexString = '';
-                for (let i = 0; i < uint8Array.length; i++) {
-                    hexString += uint8Array[i].toString(16).padStart(2, '0');
+                for (let i = 0; i < data.length; i++) {
+                    hexString += data[i].toString(16).padStart(2, '0');
                 }
 
                 // Store image data
                 newAnimalImageData = {
                     hex: hexString,
                     mime: mime,
-                    path: imagePath.split('/').pop()
+                    path: path.basename(imagePath)
                 };
 
                 // Convert to base64 for preview
-                let binary = '';
-                for (let i = 0; i < uint8Array.length; i++) {
-                    binary += String.fromCharCode(uint8Array[i]);
-                }
-                const base64 = btoa(binary);
+                const base64 = data.toString('base64');
                 scrapedData.imageDataUrl = `data:${mime};base64,${base64}`;
 
                 console.log('[App] Image loaded successfully');
@@ -745,7 +708,7 @@ async function handleNewAnimalImageSelected(event) {
 async function loadNewAnimalImage(filePath) {
     try {
         // Read the file as binary
-        const data = await Neutralino.filesystem.readBinaryFile(filePath);
+        const data = fs.readFileSync(filePath);
 
         // Determine MIME type from extension
         const ext = filePath.split('.').pop().toLowerCase();
@@ -758,26 +721,21 @@ async function loadNewAnimalImage(filePath) {
         };
         const mime = mimeTypes[ext] || 'image/jpeg';
 
-        // Convert ArrayBuffer to hex string for SQLite
-        const uint8Array = new Uint8Array(data);
+        // Convert Buffer to hex string for SQLite
         let hexString = '';
-        for (let i = 0; i < uint8Array.length; i++) {
-            hexString += uint8Array[i].toString(16).padStart(2, '0');
+        for (let i = 0; i < data.length; i++) {
+            hexString += data[i].toString(16).padStart(2, '0');
         }
 
         // Store new animal image data
         newAnimalImageData = {
             hex: hexString,
             mime: mime,
-            path: filePath.split('/').pop()
+            path: path.basename(filePath)
         };
 
         // Convert to base64 for preview
-        let binary = '';
-        for (let i = 0; i < uint8Array.length; i++) {
-            binary += String.fromCharCode(uint8Array[i]);
-        }
-        const base64 = btoa(binary);
+        const base64 = data.toString('base64');
         const dataUrl = `data:${mime};base64,${base64}`;
 
         // Update preview - create img element if it doesn't exist
@@ -963,7 +921,7 @@ async function handleEditImageSelected(event) {
 async function loadNewImage(filePath) {
     try {
         // Read the file as binary
-        const data = await Neutralino.filesystem.readBinaryFile(filePath);
+        const data = fs.readFileSync(filePath);
 
         // Determine MIME type from extension
         const ext = filePath.split('.').pop().toLowerCase();
@@ -976,26 +934,21 @@ async function loadNewImage(filePath) {
         };
         const mime = mimeTypes[ext] || 'image/jpeg';
 
-        // Convert ArrayBuffer to hex string for SQLite
-        const uint8Array = new Uint8Array(data);
+        // Convert Buffer to hex string for SQLite
         let hexString = '';
-        for (let i = 0; i < uint8Array.length; i++) {
-            hexString += uint8Array[i].toString(16).padStart(2, '0');
+        for (let i = 0; i < data.length; i++) {
+            hexString += data[i].toString(16).padStart(2, '0');
         }
 
         // Store pending image data
         pendingImageData = {
             hex: hexString,
             mime: mime,
-            path: filePath.split('/').pop()
+            path: path.basename(filePath)
         };
 
         // Convert to base64 for preview
-        let binary = '';
-        for (let i = 0; i < uint8Array.length; i++) {
-            binary += String.fromCharCode(uint8Array[i]);
-        }
-        const base64 = btoa(binary);
+        const base64 = data.toString('base64');
         const dataUrl = `data:${mime};base64,${base64}`;
 
         // Update preview
@@ -1459,13 +1412,13 @@ async function openSelectFromSiteModal() {
         const command = `node scrape-list.js "${url.replace(/"/g, '\\"')}"`;
         console.log('[App] Executing list scraper command');
 
-        const result = await Neutralino.os.execCommand(command, { cwd: NL_PATH });
+        const result = await execAsync(command, { cwd: path.join(APP_PATH, 'app') });
 
-        console.log('[App] List scraper exit code:', result.exitCode);
+        console.log('[App] List scraper completed');
 
         // Log stderr (debug messages from scraper)
-        if (result.stdErr) {
-            const lines = result.stdErr.split('\n');
+        if (result.stderr) {
+            const lines = result.stderr.split('\n');
             for (const line of lines) {
                 if (line.trim()) {
                     console.log('[List Scraper]', line);
@@ -1473,12 +1426,8 @@ async function openSelectFromSiteModal() {
             }
         }
 
-        if (result.exitCode !== 0) {
-            throw new Error(result.stdErr || 'List scraping failed');
-        }
-
         // Parse the scraped list from stdout
-        scrapedAnimals = JSON.parse(result.stdOut.trim());
+        scrapedAnimals = JSON.parse(result.stdout.trim());
         console.log('[App] Scraped', scrapedAnimals.length, 'animals');
 
         if (scrapedAnimals.length === 0) {
@@ -1601,16 +1550,8 @@ async function importSelectedAnimals() {
             console.log(`[App] Importing ${i + 1}/${urlsToImport.length}: ${animalName}`);
 
             try {
-                // Call the scraper script
-                const command = `node scrape-url.js "${url.replace(/"/g, '\\"')}"`;
-                const result = await Neutralino.os.execCommand(command, { cwd: NL_PATH });
-
-                if (result.exitCode !== 0) {
-                    throw new Error(result.stdErr || 'Scraping failed');
-                }
-
-                // Parse the scraped data from stdout
-                const scrapedData = JSON.parse(result.stdOut.trim());
+                // Call the scraper directly
+                const scrapedData = await scrapeAnimalPage(url);
                 console.log('[App] Scraped data for:', scrapedData.name);
 
                 // Load image if available
@@ -1619,9 +1560,9 @@ async function importSelectedAnimals() {
                     try {
                         const imagePath = scrapedData.imagePath.startsWith('/')
                             ? scrapedData.imagePath
-                            : `${NL_PATH}/${scrapedData.imagePath}`;
+                            : path.join(APP_PATH, scrapedData.imagePath);
 
-                        const data = await Neutralino.filesystem.readBinaryFile(imagePath);
+                        const data = fs.readFileSync(imagePath);
                         const ext = imagePath.split('.').pop().toLowerCase();
                         const mimeTypes = {
                             'jpg': 'image/jpeg',
@@ -1632,16 +1573,15 @@ async function importSelectedAnimals() {
                         };
                         const mime = mimeTypes[ext] || 'image/jpeg';
 
-                        const uint8Array = new Uint8Array(data);
                         let hexString = '';
-                        for (let j = 0; j < uint8Array.length; j++) {
-                            hexString += uint8Array[j].toString(16).padStart(2, '0');
+                        for (let j = 0; j < data.length; j++) {
+                            hexString += data[j].toString(16).padStart(2, '0');
                         }
 
                         imageData = {
                             hex: hexString,
                             mime: mime,
-                            path: imagePath.split('/').pop()
+                            path: path.basename(imagePath)
                         };
                     } catch (imgErr) {
                         console.error('[App] Error loading image:', imgErr);
@@ -1698,7 +1638,10 @@ async function importSelectedAnimals() {
                 // Clean up temporary image file
                 if (scrapedData.imagePath) {
                     try {
-                        await Neutralino.os.execCommand(`rm "${scrapedData.imagePath}"`, { cwd: NL_PATH });
+                        const imagePath = scrapedData.imagePath.startsWith('/')
+                            ? scrapedData.imagePath
+                            : path.join(APP_PATH, scrapedData.imagePath);
+                        fs.unlinkSync(imagePath);
                     } catch (cleanupErr) {
                         console.error('[App] Error cleaning up temp file:', cleanupErr);
                     }
@@ -1732,11 +1675,9 @@ async function importSelectedAnimals() {
 
 // Note: Click handlers for image containers are now inline in HTML
 
-// Initialize app
-Neutralino.init();
-
-Neutralino.events.on('ready', async () => {
-    log('========== Neutralino app ready ==========');
+// Initialize app when DOM is ready
+document.addEventListener('DOMContentLoaded', async () => {
+    log('========== Electron app ready ==========');
 
     // Setup paths first (this updates DB_PATH and LOG_FILE)
     await setupPaths();
@@ -1761,10 +1702,6 @@ Neutralino.events.on('ready', async () => {
 
     // Load animals after initialization
     await loadAnimals();
-});
-
-Neutralino.events.on('windowClose', () => {
-    Neutralino.app.exit();
 });
 
 // Card generation queue
@@ -1850,17 +1787,12 @@ async function printCardFront(animalId) {
                 console.log('[App] Portrait data extracted, length:', portraitData.length);
 
                 // Write to temporary file
-                tempImagePath = `${TMP_DIR}/portrait-${animal.id}-${Date.now()}.jpg`;
+                tempImagePath = path.join(TMP_DIR, `portrait-${animal.id}-${Date.now()}.jpg`);
                 console.log('[App] Writing portrait to temp file:', tempImagePath);
 
                 // Convert base64 to binary buffer
-                const binaryString = atob(portraitData);
-                const bytes = new Uint8Array(binaryString.length);
-                for (let i = 0; i < binaryString.length; i++) {
-                    bytes[i] = binaryString.charCodeAt(i);
-                }
-
-                await Neutralino.filesystem.writeBinaryFile(tempImagePath, bytes);
+                const buffer = Buffer.from(portraitData, 'base64');
+                fs.writeFileSync(tempImagePath, buffer);
                 console.log('[App] Portrait written to temp file');
                 portraitFilePath = tempImagePath;
             } else {
@@ -1890,49 +1822,29 @@ async function printCardFront(animalId) {
 
         console.log('[App] Parameters prepared:', JSON.stringify({...params}));
 
-        // Call the card generation script
-        const jsonParams = JSON.stringify(params);
-        const command = `node generate-card-cli.js '${jsonParams.replace(/'/g, "\\'")}' `;
-        console.log('[App] Executing command:', command.substring(0, 200) + '...');
-
-        const result = await Neutralino.os.execCommand(command, { cwd: NL_PATH });
-
-        console.log('[App] Command exit code:', result.exitCode);
-
-        // Log stderr (debug messages)
-        if (result.stdErr) {
-            const lines = result.stdErr.split('\n');
-            for (const line of lines) {
-                if (line.trim()) {
-                    console.log('[CardGen Debug]', line);
-                }
-            }
-        }
-
-        if (result.exitCode !== 0) {
-            throw new Error(result.stdErr || 'Card generation failed');
-        }
-
-        // The output path is in stdout
-        const outputPath = result.stdOut.trim();
+        // Call the card generation function directly (no subprocess needed)
+        const outputPath = await generateCardFront(params);
         console.log('[App] Card generated at:', outputPath);
 
         // Clean up temporary file
         if (tempImagePath) {
             try {
-                await Neutralino.os.execCommand(`rm "${tempImagePath}"`, { cwd: NL_PATH });
+                fs.unlinkSync(tempImagePath);
                 console.log('[App] Cleaned up temp file:', tempImagePath);
             } catch (cleanupErr) {
                 console.error('[App] Error cleaning up temp file:', cleanupErr);
             }
         }
 
-        // Open in GIMP (don't wait for it to exit)
+        // Open in GIMP via IPC (cross-platform)
         console.log('[App] Opening GIMP...');
-        Neutralino.os.execCommand(`gimp "${outputPath}" &`, { cwd: NL_PATH }).catch(err => {
-            console.error('[App] Error launching GIMP:', err);
-        });
-        console.log('[App] GIMP launched');
+        const gimpResult = await ipcRenderer.invoke('open-in-gimp', outputPath);
+        if (gimpResult.success) {
+            console.log('[App] GIMP launched successfully');
+        } else {
+            console.error('[App] Error launching GIMP:', gimpResult.error);
+            showToast('Could not launch GIMP. Is it installed?', 'error');
+        }
 
         showToast(`Card front generated for ${animal.name}!`);
     } catch (err) {
@@ -1943,7 +1855,7 @@ async function printCardFront(animalId) {
         // Clean up temporary file on error
         if (tempImagePath) {
             try {
-                await Neutralino.os.execCommand(`rm "${tempImagePath}"`, { cwd: NL_PATH });
+                fs.unlinkSync(tempImagePath);
                 console.log('[App] Cleaned up temp file after error:', tempImagePath);
             } catch (cleanupErr) {
                 console.error('[App] Error cleaning up temp file after error:', cleanupErr);
@@ -1975,17 +1887,12 @@ async function printCardBack(animalId) {
                 console.log('[App] Portrait data extracted, length:', portraitData.length);
 
                 // Write to temporary file
-                tempImagePath = `${TMP_DIR}/portrait-${animal.id}-${Date.now()}.jpg`;
+                tempImagePath = path.join(TMP_DIR, `portrait-${animal.id}-${Date.now()}.jpg`);
                 console.log('[App] Writing portrait to temp file:', tempImagePath);
 
                 // Convert base64 to binary buffer
-                const binaryString = atob(portraitData);
-                const bytes = new Uint8Array(binaryString.length);
-                for (let i = 0; i < binaryString.length; i++) {
-                    bytes[i] = binaryString.charCodeAt(i);
-                }
-
-                await Neutralino.filesystem.writeBinaryFile(tempImagePath, bytes);
+                const buffer = Buffer.from(portraitData, 'base64');
+                fs.writeFileSync(tempImagePath, buffer);
                 console.log('[App] Portrait written to temp file');
                 portraitFilePath = tempImagePath;
             } else {
@@ -2015,49 +1922,29 @@ async function printCardBack(animalId) {
 
         console.log('[App] Parameters prepared:', JSON.stringify({...params}));
 
-        // Call the card generation script with 'back' parameter
-        const jsonParams = JSON.stringify(params);
-        const command = `node generate-card-cli.js '${jsonParams.replace(/'/g, "\\'")}' back`;
-        console.log('[App] Executing command:', command.substring(0, 200) + '...');
-
-        const result = await Neutralino.os.execCommand(command, { cwd: NL_PATH });
-
-        console.log('[App] Command exit code:', result.exitCode);
-
-        // Log stderr (debug messages)
-        if (result.stdErr) {
-            const lines = result.stdErr.split('\n');
-            for (const line of lines) {
-                if (line.trim()) {
-                    console.log('[CardGen Debug]', line);
-                }
-            }
-        }
-
-        if (result.exitCode !== 0) {
-            throw new Error(result.stdErr || 'Card generation failed');
-        }
-
-        // The output path is in stdout
-        const outputPath = result.stdOut.trim();
+        // Call the card generation function directly (no subprocess needed)
+        const outputPath = await generateCardBack(params);
         console.log('[App] Card generated at:', outputPath);
 
         // Clean up temporary file
         if (tempImagePath) {
             try {
-                await Neutralino.os.execCommand(`rm "${tempImagePath}"`, { cwd: NL_PATH });
+                fs.unlinkSync(tempImagePath);
                 console.log('[App] Cleaned up temp file:', tempImagePath);
             } catch (cleanupErr) {
                 console.error('[App] Error cleaning up temp file:', cleanupErr);
             }
         }
 
-        // Open in GIMP (don't wait for it to exit)
+        // Open in GIMP via IPC (cross-platform)
         console.log('[App] Opening GIMP...');
-        Neutralino.os.execCommand(`gimp "${outputPath}" &`, { cwd: NL_PATH }).catch(err => {
-            console.error('[App] Error launching GIMP:', err);
-        });
-        console.log('[App] GIMP launched');
+        const gimpResult = await ipcRenderer.invoke('open-in-gimp', outputPath);
+        if (gimpResult.success) {
+            console.log('[App] GIMP launched successfully');
+        } else {
+            console.error('[App] Error launching GIMP:', gimpResult.error);
+            showToast('Could not launch GIMP. Is it installed?', 'error');
+        }
 
         showToast(`Card back generated for ${animal.name}!`);
     } catch (err) {
@@ -2068,7 +1955,7 @@ async function printCardBack(animalId) {
         // Clean up temporary file on error
         if (tempImagePath) {
             try {
-                await Neutralino.os.execCommand(`rm "${tempImagePath}"`, { cwd: NL_PATH });
+                fs.unlinkSync(tempImagePath);
                 console.log('[App] Cleaned up temp file after error:', tempImagePath);
             } catch (cleanupErr) {
                 console.error('[App] Error cleaning up temp file after error:', cleanupErr);

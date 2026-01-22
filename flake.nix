@@ -27,36 +27,41 @@
           globalBuildInputs = [];
         };
 
-        # Libraries needed for Neutralino and Chromium
-        neutralinoLibs = with pkgs; [
+        # Libraries needed for Electron
+        electronLibs = with pkgs; [
           gtk3
           glib
           cairo
+          pango
           gdk-pixbuf
           xorg.libX11
           xorg.libXrandr
           xorg.libxcb
+          xorg.libXcomposite
+          xorg.libXcursor
+          xorg.libXdamage
+          xorg.libXext
+          xorg.libXfixes
+          xorg.libXi
+          xorg.libXrender
+          xorg.libXtst
+          xorg.libxshmfence
+          libxkbcommon
           libpng
           stdenv.cc.cc.lib
-          webkitgtk_4_1
           nss
           nspr
           dbus
           cups
           libdrm
           mesa
+          libgbm
           expat
           alsa-lib
           at-spi2-atk
           at-spi2-core
+          systemd
         ];
-
-        # Wrapped script to run Neutralino with proper library paths
-        neutralinoWrapper = pkgs.writeShellScriptBin "neu-run" ''
-          export LD_LIBRARY_PATH="${pkgs.lib.makeLibraryPath neutralinoLibs}:$LD_LIBRARY_PATH"
-          cd "$1"
-          exec ./bin/neutralino-linux_x64 "$@"
-        '';
 
         # Main foster-card-generator package
         foster-card-generator = pkgs.stdenv.mkDerivation {
@@ -71,18 +76,28 @@
           nativeBuildInputs = with pkgs; [
             makeWrapper
             nodejs_22
+            python3
+            pkg-config
+            gnumake
+            gcc
           ];
 
           buildInputs = with pkgs; [
             chromium
             sqlite
             gimp
+            electron
             node2nixPkgs.nodeDependencies
           ];
 
           buildPhase = ''
             # Copy node_modules from node2nix (not link, to avoid broken symlink check)
             cp -rL ${node2nixPkgs.nodeDependencies}/lib/node_modules node_modules
+            chmod -R u+w node_modules
+
+            # Rebuild better-sqlite3 for Electron using electron-rebuild
+            export HOME=$(mktemp -d)
+            ${pkgs.nodejs_22}/bin/npx @electron/rebuild -f -w better-sqlite3 -v ${pkgs.electron.version}
           '';
 
           installPhase = ''
@@ -96,44 +111,22 @@
             cp -r src $out/lib/foster-card-generator/
             cp -r db $out/lib/foster-card-generator/ || true
             cp package.json $out/lib/foster-card-generator/
+            cp main.js $out/lib/foster-card-generator/
 
             # Copy node_modules
             cp -r node_modules $out/lib/foster-card-generator/
 
             # Copy icon
             cp src/logo.png $out/share/icons/hicolor/256x256/apps/foster-card-generator.png
-            mkdir -p $out/lib/foster-card-generator/app/resources/icons
-            cp src/logo.png $out/lib/foster-card-generator/app/resources/icons/appIcon.png
 
-            # Copy resources.neu from dist (pre-built by neu build)
-            cp app/dist/foster-app/resources.neu $out/lib/foster-card-generator/app/
-
-            # Make binaries executable first
-            chmod +x $out/lib/foster-card-generator/app/bin/neutralino-linux_x64
-            chmod +x $out/lib/foster-card-generator/app/bin/neutralino-linux_arm64
-            chmod +x $out/lib/foster-card-generator/app/bin/neutralino-linux_armhf
-            chmod +x $out/lib/foster-card-generator/app/generate-card-cli.js
-
-            # Create launcher script
-            cat > $out/bin/foster-card-generator <<'LAUNCHER'
-            #!/usr/bin/env bash
-            # Create data directory for app output
-            mkdir -p "$HOME/.local/share/foster-card-generator/output"
-
-            # Run Neutralino with the app path
-            exec "@out@/lib/foster-card-generator/app/bin/neutralino-linux_x64" --path="@out@/lib/foster-card-generator/app" "$@"
-            LAUNCHER
-            chmod +x $out/bin/foster-card-generator
-            substituteInPlace $out/bin/foster-card-generator --replace "@out@" "$out"
-
-            # Set up environment via a wrapper around our launcher
-            mv $out/bin/foster-card-generator $out/bin/.foster-card-generator-unwrapped
-            makeWrapper $out/bin/.foster-card-generator-unwrapped $out/bin/foster-card-generator \
+            # Create wrapper script that runs electron
+            makeWrapper ${pkgs.electron}/bin/electron $out/bin/foster-card-generator \
+              --add-flags "$out/lib/foster-card-generator" \
               --set PUPPETEER_EXECUTABLE_PATH "${pkgs.chromium}/bin/chromium" \
               --set PUPPETEER_SKIP_DOWNLOAD "1" \
               --prefix PATH : ${pkgs.lib.makeBinPath [ pkgs.chromium pkgs.nodejs_22 pkgs.sqlite pkgs.gimp ]} \
               --prefix NODE_PATH : "$out/lib/foster-card-generator/node_modules" \
-              --prefix LD_LIBRARY_PATH : "${pkgs.lib.makeLibraryPath neutralinoLibs}"
+              --prefix LD_LIBRARY_PATH : "${pkgs.lib.makeLibraryPath electronLibs}"
 
             # Create desktop entry
             cat > $out/share/applications/foster-card-generator.desktop <<EOF
@@ -179,12 +172,11 @@
               nodejs_22
               chromium
               sqlite
-              neutralinoWrapper
-              zenity  # Required for Neutralino file dialogs on Linux
-            ] ++ neutralinoLibs;
+              electron
+            ] ++ electronLibs;
             shellHook = ''
               export PUPPETEER_EXECUTABLE_PATH=${pkgs.chromium}/bin/chromium
-              export LD_LIBRARY_PATH="${pkgs.lib.makeLibraryPath neutralinoLibs}:$LD_LIBRARY_PATH"
+              export LD_LIBRARY_PATH="${pkgs.lib.makeLibraryPath electronLibs}:$LD_LIBRARY_PATH"
             '';
           };
         };
