@@ -7,27 +7,23 @@ on:
 
 jobs:
   build-windows:
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Install Nix
-        uses: cachix/install-nix-action@v27
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
         with:
-          nix_path: nixpkgs=channel:nixos-unstable
+          node-version: '20'
+          cache: 'npm'
 
-      - name: Build Windows executable with Nix
-        run: |
-          nix develop --command bash -c "
-            # Install dependencies
-            npm ci
+      - name: Install dependencies
+        run: npm ci
 
-            # Build Windows targets using electron-builder
-            # electron-builder handles cross-compilation to Windows from Linux
-            npm run build -- --win --x64 --publish never
-          "
+      - name: Build Windows executable
+        run: npm run build -- --win --x64 --publish never
 
       - name: Upload Windows artifacts
         uses: actions/upload-artifact@v4
