@@ -8,23 +8,12 @@ let TMP_DIR = null;
 // Node.js modules for Electron
 const fs = require('fs');
 const path = require('path');
-const os = require('os');
 const { exec } = require('child_process');
 const { promisify } = require('util');
 const execAsync = promisify(exec);
 
-// Try to load better-sqlite3, but handle if it fails (e.g., native module mismatch)
-let Database = null;
-let databaseLoadError = null;
-try {
-    Database = require('better-sqlite3');
-} catch (err) {
-    databaseLoadError = err;
-    console.error('[App] Failed to load better-sqlite3:', err.message);
-}
-
-// Database connection (initialized in setupPaths)
-let db = null;
+// Database module
+const db = require('../db.js');
 
 // Import card generation functions directly (no need to spawn subprocess)
 let generateCardFront = null;
@@ -123,71 +112,31 @@ function closeDebugModal() {
     document.getElementById('debugModal').classList.remove('active');
 }
 
-// Database path - ALWAYS use HOME directory
+// Paths derived from database module
 let DB_DIR = null;
 let DB_PATH = null;
 
-// Setup paths - FORCE user home directory
+// Setup paths - initialize database and logging
 async function setupPaths() {
-    log('[App] ========== FORCING USER HOME DIRECTORY ==========');
+    log('[App] ========== INITIALIZING APPLICATION ==========');
 
     try {
-        // Get home directory
-        const homeDir = os.homedir();
-        log('[App] Got HOME from os.homedir():', homeDir);
+        // Initialize database (this also creates directories)
+        const { dbDir, dbPath } = db.initialize();
+        DB_DIR = dbDir;
+        DB_PATH = dbPath;
 
-        if (!homeDir) {
-            throw new Error('Could not determine HOME directory');
-        }
+        log('[App] Database initialized at:', DB_PATH);
 
-        const userDataDir = path.join(homeDir, '.local', 'share', 'foster-card-generator');
-        log('[App] Using directory:', userDataDir);
+        // Setup logging paths
+        LOG_DIR = DB_DIR;
+        LOG_FILE = path.join(DB_DIR, 'app.log');
+        TMP_DIR = path.join(DB_DIR, 'tmp');
 
-        // FORCE these paths
-        DB_DIR = userDataDir;
-        DB_PATH = path.join(userDataDir, 'animals.db');
-        LOG_DIR = userDataDir;
-        LOG_FILE = path.join(userDataDir, 'app.log');
-        TMP_DIR = path.join(userDataDir, 'tmp');
+        // Create tmp directory
+        fs.mkdirSync(TMP_DIR, { recursive: true });
 
-        log('[App] DB_PATH set to:', DB_PATH);
         log('[App] LOG_FILE set to:', LOG_FILE);
-
-        // Create the directory structure
-        const dirsToCreate = [
-            path.join(homeDir, '.local'),
-            path.join(homeDir, '.local', 'share'),
-            userDataDir,
-            TMP_DIR
-        ];
-
-        for (const dir of dirsToCreate) {
-            try {
-                fs.mkdirSync(dir, { recursive: true });
-                log('[App] Created directory:', dir);
-            } catch (e) {
-                log('[App] Directory exists or error:', dir, e.message);
-            }
-        }
-
-        log('[App] Directory setup complete');
-
-        // Initialize SQLite database connection
-        if (!Database) {
-            const errMsg = databaseLoadError
-                ? `better-sqlite3 failed to load: ${databaseLoadError.message}`
-                : 'better-sqlite3 module not available';
-            log('[App] ERROR:', errMsg);
-            throw new Error(errMsg);
-        }
-        try {
-            db = new Database(DB_PATH);
-            db.pragma('journal_mode = WAL');
-            log('[App] SQLite database connection established');
-        } catch (dbErr) {
-            log('[App] ERROR: Failed to initialize SQLite database:', dbErr.message);
-            throw new Error(`Failed to open database at ${DB_PATH}: ${dbErr.message}`);
-        }
 
         // Enable file logging now that paths are set
         loggingReady = true;
@@ -196,7 +145,7 @@ async function setupPaths() {
         // Update UI
         const subtitle = document.getElementById('subtitle');
         if (subtitle) {
-            subtitle.textContent = `Data directory: ${userDataDir}`;
+            subtitle.textContent = `Data directory: ${DB_DIR}`;
             subtitle.style.fontSize = '12px';
             subtitle.style.color = '#fff';
         }
@@ -230,100 +179,6 @@ let currentAnimal = null;
 let pendingImageData = null; // Stores new image data before save
 let newAnimalImageData = null; // Stores image data for new animal
 
-// Check if database exists and initialize if needed
-function initializeDatabase() {
-    try {
-        console.log('[App] Checking if database exists...');
-
-        // Check if the animals table exists
-        const tableExists = db.prepare(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name='animals'"
-        ).get();
-
-        if (!tableExists) {
-            console.log('[App] Database or animals table not found. Initializing...');
-
-            // Create the animals table schema
-            db.exec(`
-                CREATE TABLE IF NOT EXISTS animals (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    name TEXT NOT NULL,
-                    slug TEXT NOT NULL,
-                    size TEXT NOT NULL,
-                    shots INTEGER NOT NULL DEFAULT 0,
-                    housetrained INTEGER NOT NULL DEFAULT 0,
-                    breed TEXT NOT NULL,
-                    age_long TEXT NOT NULL,
-                    age_short TEXT NOT NULL,
-                    gender TEXT NOT NULL,
-                    kids TEXT NOT NULL DEFAULT '?',
-                    dogs TEXT NOT NULL DEFAULT '?',
-                    cats TEXT NOT NULL DEFAULT '?',
-                    portrait_path TEXT,
-                    portrait_data BLOB,
-                    portrait_mime TEXT,
-                    created_at TEXT DEFAULT (datetime('now')),
-                    updated_at TEXT DEFAULT (datetime('now'))
-                );
-
-                CREATE INDEX IF NOT EXISTS idx_animals_name ON animals(name);
-
-                CREATE TRIGGER IF NOT EXISTS update_animals_timestamp
-                AFTER UPDATE ON animals
-                BEGIN
-                    UPDATE animals SET updated_at = datetime('now') WHERE id = NEW.id;
-                END;
-            `);
-
-            console.log('[App] Database initialized successfully (no data seeded)');
-            return true; // Database was created
-        } else {
-            console.log('[App] Database already exists');
-            return false; // Database already existed
-        }
-    } catch (err) {
-        console.error('[App] Error initializing database:', err);
-        throw err;
-    }
-}
-
-function runSQL(sql) {
-    try {
-        db.exec(sql);
-    } catch (err) {
-        console.error('Database error:', err);
-        throw err;
-    }
-}
-
-function queryDatabase(sql) {
-    try {
-        const stmt = db.prepare(sql);
-        return stmt.all();
-    } catch (err) {
-        console.error('Database error:', err);
-        throw err;
-    }
-}
-
-function getImageAsDataUrl(animalId) {
-    try {
-        const row = db.prepare(
-            'SELECT portrait_mime, portrait_data FROM animals WHERE id = ?'
-        ).get(animalId);
-
-        if (!row || !row.portrait_mime || !row.portrait_data) {
-            return null;
-        }
-
-        // portrait_data is a Buffer in better-sqlite3, convert to base64
-        const base64 = row.portrait_data.toString('base64');
-        return `data:${row.portrait_mime};base64,${base64}`;
-    } catch (err) {
-        console.error('Error loading image:', err);
-        return null;
-    }
-}
 
 function formatCompatibility(value) {
     if (value === '1' || value === 1 || value === true) {
@@ -345,11 +200,6 @@ function showToast(message, type = 'success') {
     document.body.appendChild(toast);
 
     setTimeout(() => toast.remove(), 3000);
-}
-
-function escapeSQL(str) {
-    if (str === null || str === undefined) return 'NULL';
-    return String(str).replace(/'/g, "''");
 }
 
 function renderAnimalCard(animal) {
@@ -408,11 +258,10 @@ async function loadAnimals() {
     content.innerHTML = '<div class="loading">Loading animals...</div>';
 
     // Ensure database is initialized
-    if (!db) {
+    if (!db.isConnected()) {
         console.log('[App] Database not initialized, running setupPaths...');
         try {
             await setupPaths();
-            await initializeDatabase();
         } catch (err) {
             console.error('[App] Failed to initialize database:', err);
             content.innerHTML = `
@@ -428,11 +277,7 @@ async function loadAnimals() {
     }
 
     try {
-        const sql = `SELECT id, name, slug, size, shots, housetrained, breed,
-                     age_long, age_short, gender, kids, dogs, cats,
-                     portrait_path, portrait_mime FROM animals ORDER BY name`;
-
-        animals = queryDatabase(sql);
+        animals = db.getAllAnimals();
 
         if (animals.length === 0) {
             content.innerHTML = '<div class="loading">No animals found. Run the migration first.</div>';
@@ -444,7 +289,7 @@ async function loadAnimals() {
 
         // Load images for each animal
         for (const animal of animals) {
-            animal.imageDataUrl = await getImageAsDataUrl(animal.id);
+            animal.imageDataUrl = db.getImageAsDataUrl(animal.id);
         }
 
         // Render all cards
@@ -762,56 +607,32 @@ async function loadNewAnimalImage(filePath) {
 }
 
 async function createAnimal() {
-    const name = escapeSQL(document.getElementById('newName').value);
-    const breed = escapeSQL(document.getElementById('newBreed').value);
-    const slug = escapeSQL(document.getElementById('newSlug').value);
-    const ageLong = escapeSQL(document.getElementById('newAgeLong').value);
-    const ageShort = escapeSQL(document.getElementById('newAgeShort').value);
-    const size = escapeSQL(document.getElementById('newSize').value);
-    const gender = escapeSQL(document.getElementById('newGender').value);
-    const shots = document.getElementById('newShots').value;
-    const housetrained = document.getElementById('newHousetrained').value;
-    const kids = escapeSQL(document.getElementById('newKids').value);
-    const dogs = escapeSQL(document.getElementById('newDogs').value);
-    const cats = escapeSQL(document.getElementById('newCats').value);
-
-    // Build SQL with optional image data
-    let sql;
-    if (newAnimalImageData) {
-        sql = `INSERT INTO animals (
-            name, breed, slug, age_long, age_short, size, gender, shots, housetrained,
-            kids, dogs, cats, portrait_path, portrait_mime, portrait_data
-        ) VALUES (
-            '${name}', '${breed}', '${slug}', '${ageLong}', '${ageShort}',
-            '${size}', '${gender}', ${shots}, ${housetrained},
-            '${kids}', '${dogs}', '${cats}',
-            '${escapeSQL(newAnimalImageData.path)}',
-            '${escapeSQL(newAnimalImageData.mime)}',
-            X'${newAnimalImageData.hex}'
-        );`;
-    } else {
-        sql = `INSERT INTO animals (
-            name, breed, slug, age_long, age_short, size, gender, shots, housetrained,
-            kids, dogs, cats
-        ) VALUES (
-            '${name}', '${breed}', '${slug}', '${ageLong}', '${ageShort}',
-            '${size}', '${gender}', ${shots}, ${housetrained},
-            '${kids}', '${dogs}', '${cats}'
-        );`;
-    }
+    const animalData = {
+        name: document.getElementById('newName').value,
+        breed: document.getElementById('newBreed').value,
+        slug: document.getElementById('newSlug').value,
+        age_long: document.getElementById('newAgeLong').value,
+        age_short: document.getElementById('newAgeShort').value,
+        size: document.getElementById('newSize').value,
+        gender: document.getElementById('newGender').value,
+        shots: document.getElementById('newShots').value === '1',
+        housetrained: document.getElementById('newHousetrained').value === '1',
+        kids: document.getElementById('newKids').value,
+        dogs: document.getElementById('newDogs').value,
+        cats: document.getElementById('newCats').value
+    };
 
     try {
         console.log('[App] Creating animal with image data:', newAnimalImageData ? 'Yes' : 'No');
         if (newAnimalImageData) {
             console.log('[App] Image data size:', newAnimalImageData.hex.length / 2, 'bytes');
         }
-        await runSQL(sql);
-        showToast(`${document.getElementById('newName').value} created successfully!`);
+        db.createAnimal(animalData, newAnimalImageData);
+        showToast(`${animalData.name} created successfully!`);
         closeManualEntryModal();
         await loadAnimals();
     } catch (err) {
         console.error('[App] Error creating animal:', err);
-        console.error('[App] SQL length:', sql.length);
         showToast(`Error creating animal: ${err.message}`, 'error');
     }
 }
@@ -968,60 +789,25 @@ async function loadNewImage(filePath) {
 async function saveAnimal() {
     if (!currentAnimal) return;
 
-    const id = document.getElementById('animalId').value;
-    const name = escapeSQL(document.getElementById('name').value);
-    const breed = escapeSQL(document.getElementById('breed').value);
-    const slug = escapeSQL(document.getElementById('slug').value);
-    const ageLong = escapeSQL(document.getElementById('ageLong').value);
-    const ageShort = escapeSQL(document.getElementById('ageShort').value);
-    const size = escapeSQL(document.getElementById('size').value);
-    const gender = escapeSQL(document.getElementById('gender').value);
-    const shots = document.getElementById('shots').value;
-    const housetrained = document.getElementById('housetrained').value;
-    const kids = escapeSQL(document.getElementById('kids').value);
-    const dogs = escapeSQL(document.getElementById('dogs').value);
-    const cats = escapeSQL(document.getElementById('cats').value);
-
-    // Build SQL with optional image update
-    let sql;
-    if (pendingImageData) {
-        sql = `UPDATE animals SET
-            name = '${name}',
-            breed = '${breed}',
-            slug = '${slug}',
-            age_long = '${ageLong}',
-            age_short = '${ageShort}',
-            size = '${size}',
-            gender = '${gender}',
-            shots = ${shots},
-            housetrained = ${housetrained},
-            kids = '${kids}',
-            dogs = '${dogs}',
-            cats = '${cats}',
-            portrait_path = '${escapeSQL(pendingImageData.path)}',
-            portrait_mime = '${escapeSQL(pendingImageData.mime)}',
-            portrait_data = X'${pendingImageData.hex}'
-            WHERE id = ${id};`;
-    } else {
-        sql = `UPDATE animals SET
-            name = '${name}',
-            breed = '${breed}',
-            slug = '${slug}',
-            age_long = '${ageLong}',
-            age_short = '${ageShort}',
-            size = '${size}',
-            gender = '${gender}',
-            shots = ${shots},
-            housetrained = ${housetrained},
-            kids = '${kids}',
-            dogs = '${dogs}',
-            cats = '${cats}'
-            WHERE id = ${id};`;
-    }
+    const id = parseInt(document.getElementById('animalId').value, 10);
+    const animalData = {
+        name: document.getElementById('name').value,
+        breed: document.getElementById('breed').value,
+        slug: document.getElementById('slug').value,
+        age_long: document.getElementById('ageLong').value,
+        age_short: document.getElementById('ageShort').value,
+        size: document.getElementById('size').value,
+        gender: document.getElementById('gender').value,
+        shots: document.getElementById('shots').value === '1',
+        housetrained: document.getElementById('housetrained').value === '1',
+        kids: document.getElementById('kids').value,
+        dogs: document.getElementById('dogs').value,
+        cats: document.getElementById('cats').value
+    };
 
     try {
-        await runSQL(sql);
-        showToast(`${document.getElementById('name').value} updated successfully!`);
+        db.updateAnimal(id, animalData, pendingImageData);
+        showToast(`${animalData.name} updated successfully!`);
         closeModal();
         await loadAnimals();
     } catch (err) {
@@ -1037,10 +823,8 @@ async function deleteAnimal() {
 
     if (!confirmed) return;
 
-    const sql = `DELETE FROM animals WHERE id = ${currentAnimal.id};`;
-
     try {
-        await runSQL(sql);
+        db.deleteAnimal(currentAnimal.id);
         showToast(`${name} deleted successfully!`);
         closeModal();
         await loadAnimals();
@@ -1349,26 +1133,9 @@ async function deleteSelectedAnimals() {
         grid.innerHTML = '<div class="loading-spinner">Deleting animals...</div>';
 
         const idsToDelete = Array.from(selectedDeleteAnimalIds);
-        let successCount = 0;
-        let failCount = 0;
+        deleteButton.textContent = `Deleting ${idsToDelete.length} animals...`;
 
-        for (let i = 0; i < idsToDelete.length; i++) {
-            const animalId = idsToDelete[i];
-            const animal = animals.find(a => a.id === animalId);
-            const animalName = animal ? animal.name : `ID ${animalId}`;
-
-            deleteButton.textContent = `Deleting ${i + 1}/${idsToDelete.length}...`;
-
-            try {
-                const sql = `DELETE FROM animals WHERE id = ${animalId};`;
-                await runSQL(sql);
-                console.log(`[App] Deleted animal: ${animalName}`);
-                successCount++;
-            } catch (err) {
-                console.error(`[App] Error deleting ${animalName}:`, err);
-                failCount++;
-            }
-        }
+        const { successCount, failCount } = db.deleteAnimals(idsToDelete);
 
         // Show summary
         let message = `Deleted ${successCount} animal${successCount !== 1 ? 's' : ''}`;
@@ -1589,49 +1356,22 @@ async function importSelectedAnimals() {
                 }
 
                 // Insert into database
-                let sql;
-                if (imageData) {
-                    sql = `INSERT INTO animals (
-                        name, breed, slug, age_long, age_short, size, gender, shots, housetrained,
-                        kids, dogs, cats, portrait_path, portrait_mime, portrait_data
-                    ) VALUES (
-                        '${escapeSQL(scrapedData.name)}',
-                        '${escapeSQL(scrapedData.breed)}',
-                        '${escapeSQL(scrapedData.slug)}',
-                        '${escapeSQL(scrapedData.age_long)}',
-                        '${escapeSQL(scrapedData.age_short)}',
-                        '${escapeSQL(scrapedData.size)}',
-                        '${escapeSQL(scrapedData.gender)}',
-                        ${scrapedData.shots ? 1 : 0},
-                        ${scrapedData.housetrained ? 1 : 0},
-                        '${escapeSQL(scrapedData.kids)}',
-                        '${escapeSQL(scrapedData.dogs)}',
-                        '${escapeSQL(scrapedData.cats)}',
-                        '${escapeSQL(imageData.path)}',
-                        '${escapeSQL(imageData.mime)}',
-                        X'${imageData.hex}'
-                    );`;
-                } else {
-                    sql = `INSERT INTO animals (
-                        name, breed, slug, age_long, age_short, size, gender, shots, housetrained,
-                        kids, dogs, cats
-                    ) VALUES (
-                        '${escapeSQL(scrapedData.name)}',
-                        '${escapeSQL(scrapedData.breed)}',
-                        '${escapeSQL(scrapedData.slug)}',
-                        '${escapeSQL(scrapedData.age_long)}',
-                        '${escapeSQL(scrapedData.age_short)}',
-                        '${escapeSQL(scrapedData.size)}',
-                        '${escapeSQL(scrapedData.gender)}',
-                        ${scrapedData.shots ? 1 : 0},
-                        ${scrapedData.housetrained ? 1 : 0},
-                        '${escapeSQL(scrapedData.kids)}',
-                        '${escapeSQL(scrapedData.dogs)}',
-                        '${escapeSQL(scrapedData.cats)}'
-                    );`;
-                }
+                const animalData = {
+                    name: scrapedData.name,
+                    breed: scrapedData.breed,
+                    slug: scrapedData.slug,
+                    age_long: scrapedData.age_long,
+                    age_short: scrapedData.age_short,
+                    size: scrapedData.size,
+                    gender: scrapedData.gender,
+                    shots: scrapedData.shots,
+                    housetrained: scrapedData.housetrained,
+                    kids: scrapedData.kids,
+                    dogs: scrapedData.dogs,
+                    cats: scrapedData.cats
+                };
 
-                await runSQL(sql);
+                db.createAnimal(animalData, imageData);
                 console.log('[App] Successfully imported:', scrapedData.name);
                 successCount++;
 
@@ -1679,21 +1419,18 @@ async function importSelectedAnimals() {
 document.addEventListener('DOMContentLoaded', async () => {
     log('========== Electron app ready ==========');
 
-    // Setup paths first (this updates DB_PATH and LOG_FILE)
-    await setupPaths();
-
-    // Initialize database if needed
+    // Setup paths and initialize database
     try {
-        await initializeDatabase();
+        await setupPaths();
     } catch (err) {
-        console.error('[App] Failed to initialize database:', err);
+        console.error('[App] Failed to initialize:', err);
         const content = document.getElementById('content');
         if (content) {
             content.innerHTML = `
                 <div class="error">
-                    <h3>Database Initialization Failed</h3>
+                    <h3>Initialization Failed</h3>
                     <p>${err.message}</p>
-                    <p>Please ensure sqlite3 is installed and accessible.</p>
+                    <p>Please ensure better-sqlite3 is installed correctly.</p>
                 </div>
             `;
         }
