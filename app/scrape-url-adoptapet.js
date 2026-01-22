@@ -1,4 +1,4 @@
-const puppeteer = require('puppeteer');
+const { launchBrowser } = require('./browser-helper.js');
 const fs = require('fs').promises;
 const path = require('path');
 const os = require('os');
@@ -12,8 +12,7 @@ const TMP_DIR = path.join(os.homedir(), '.local', 'share', 'foster-card-generato
  * @returns {Promise<Object>} - Scraped animal data
  */
 async function scrapeAnimalPage(url) {
-    const browser = await puppeteer.launch({
-        headless: 'new',
+    const browser = await launchBrowser({
         args: [
             '--no-sandbox',
             '--disable-setuid-sandbox',

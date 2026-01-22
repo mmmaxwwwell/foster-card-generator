@@ -1,4 +1,4 @@
-const puppeteer = require('puppeteer');
+const { launchBrowser } = require('./browser-helper.js');
 
 /**
  * Scrapes the organization page and extracts all animal listings
@@ -6,10 +6,7 @@ const puppeteer = require('puppeteer');
  * @returns {Promise<Array>} - Array of animals with name and URL
  */
 async function scrapeAnimalList(url) {
-    const browser = await puppeteer.launch({
-        headless: 'new',
-        args: ['--no-sandbox', '--disable-setuid-sandbox']
-    });
+    const browser = await launchBrowser();
 
     try {
         const page = await browser.newPage();

@@ -164,8 +164,8 @@ async function capture(page, outputPath) {
 async function generateCardFront(params) {
     console.log('[Card Gen] Starting card front generation...');
     console.log('[Card Gen] Launching Puppeteer browser...');
-    const puppeteer = require('puppeteer');
-    const browser = await puppeteer.launch({ headless: 'new' });
+    const { launchBrowser } = require('./browser-helper.js');
+    const browser = await launchBrowser();
     console.log('[Card Gen] Browser launched');
 
     const page = await browser.newPage();
@@ -211,8 +211,8 @@ async function generateCardFront(params) {
 async function generateCardBack(params) {
     console.log('[Card Gen] Starting card back generation...');
     console.log('[Card Gen] Launching Puppeteer browser...');
-    const puppeteer = require('puppeteer');
-    const browser = await puppeteer.launch({ headless: 'new' });
+    const { launchBrowser } = require('./browser-helper.js');
+    const browser = await launchBrowser();
     console.log('[Card Gen] Browser launched');
 
     const page = await browser.newPage();
