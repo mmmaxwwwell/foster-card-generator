@@ -109,8 +109,14 @@ ipcMain.handle('open-in-gimp', async (event, filePath) => {
         let gimpCommand;
 
         if (process.platform === 'win32') {
-            // Windows: Try common GIMP installation paths
+            // Windows: Try common GIMP installation paths (including GIMP 3.x)
             const possiblePaths = [
+                // GIMP 3.x paths
+                path.join(process.env['ProgramFiles'] || 'C:\\Program Files', 'GIMP 3', 'bin', 'gimp-3.0.exe'),
+                path.join(process.env['ProgramFiles(x86)'] || 'C:\\Program Files (x86)', 'GIMP 3', 'bin', 'gimp-3.0.exe'),
+                path.join(process.env['ProgramFiles'] || 'C:\\Program Files', 'GIMP 3', 'bin', 'gimp.exe'),
+                path.join(process.env['LOCALAPPDATA'] || '', 'Programs', 'GIMP 3', 'bin', 'gimp-3.0.exe'),
+                // GIMP 2.x paths
                 path.join(process.env['ProgramFiles'] || 'C:\\Program Files', 'GIMP 2', 'bin', 'gimp-2.10.exe'),
                 path.join(process.env['ProgramFiles(x86)'] || 'C:\\Program Files (x86)', 'GIMP 2', 'bin', 'gimp-2.10.exe'),
                 path.join(process.env['ProgramFiles'] || 'C:\\Program Files', 'GIMP 2', 'bin', 'gimp.exe'),
@@ -126,7 +132,10 @@ ipcMain.handle('open-in-gimp', async (event, filePath) => {
             }
 
             if (!gimpCommand) {
+                console.log('[Main] No GIMP installation found in common paths, falling back to PATH');
                 gimpCommand = 'gimp';
+            } else {
+                console.log('[Main] Found GIMP at:', gimpCommand);
             }
         } else {
             // Linux/macOS: Use 'gimp' from PATH
@@ -142,7 +151,7 @@ ipcMain.handle('open-in-gimp', async (event, filePath) => {
             delete env.LD_LIBRARY_PATH;
         }
 
-        exec(fullCommand, { env }, (err, stdout, stderr) => {
+        const child = exec(fullCommand, { env }, (err, stdout, stderr) => {
             if (err) {
                 console.error('[Main] GIMP exec error:', err.message);
                 if (stderr) console.error('[Main] GIMP stderr:', stderr);
@@ -150,7 +159,15 @@ ipcMain.handle('open-in-gimp', async (event, filePath) => {
             if (stdout) console.log('[Main] GIMP stdout:', stdout);
         });
 
-        // Don't wait for GIMP to exit, just resolve immediately
-        resolve({ success: true });
+        // Give it a moment to check if the process spawned
+        setTimeout(() => {
+            if (child.pid) {
+                console.log('[Main] GIMP process started with PID:', child.pid);
+                resolve({ success: true });
+            } else {
+                console.error('[Main] GIMP process failed to start');
+                resolve({ success: false, error: 'Failed to start GIMP process' });
+            }
+        }, 500);
     });
 });
