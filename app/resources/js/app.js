@@ -406,7 +406,7 @@ async function scrapeUrl() {
         if (scrapedData.imagePath) {
             try {
                 // Convert relative path to absolute path (relative to APP_PATH)
-                const imagePath = scrapedData.imagePath.startsWith('/')
+                const imagePath = path.isAbsolute(scrapedData.imagePath)
                     ? scrapedData.imagePath
                     : path.join(APP_PATH, scrapedData.imagePath);
                 console.log('[App] Loading scraped image from:', imagePath);
@@ -1378,7 +1378,7 @@ async function importSelectedAnimals() {
                 let imageData = null;
                 if (scrapedData.imagePath) {
                     try {
-                        const imagePath = scrapedData.imagePath.startsWith('/')
+                        const imagePath = path.isAbsolute(scrapedData.imagePath)
                             ? scrapedData.imagePath
                             : path.join(APP_PATH, scrapedData.imagePath);
 
@@ -1436,7 +1436,7 @@ async function importSelectedAnimals() {
                 // Clean up temporary image file
                 if (scrapedData.imagePath) {
                     try {
-                        const imagePath = scrapedData.imagePath.startsWith('/')
+                        const imagePath = path.isAbsolute(scrapedData.imagePath)
                             ? scrapedData.imagePath
                             : path.join(APP_PATH, scrapedData.imagePath);
                         fs.unlinkSync(imagePath);
