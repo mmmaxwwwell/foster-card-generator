@@ -4,8 +4,8 @@
  */
 
 const path = require('path');
-const os = require('os');
 const fs = require('fs');
+const { getDataDir } = require('./paths.js');
 
 // Try to load better-sqlite3
 let Database = null;
@@ -48,12 +48,7 @@ function isConnected() {
  * @returns {Object} - { dbDir, dbPath } paths used
  */
 function initialize() {
-    const homeDir = os.homedir();
-    if (!homeDir) {
-        throw new Error('Could not determine HOME directory');
-    }
-
-    DB_DIR = path.join(homeDir, '.local', 'share', 'foster-card-generator');
+    DB_DIR = getDataDir();
     DB_PATH = path.join(DB_DIR, 'animals.db');
 
     // Create directory if needed

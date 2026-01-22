@@ -1,10 +1,10 @@
 const { launchBrowser } = require('./browser-helper.js');
+const { getTmpDir } = require('./paths.js');
 const fs = require('fs').promises;
 const path = require('path');
-const os = require('os');
 
-// Get the tmp directory in user's data folder
-const TMP_DIR = path.join(os.homedir(), '.local', 'share', 'foster-card-generator', 'tmp');
+// Get the tmp directory in user's data folder (cross-platform)
+const TMP_DIR = getTmpDir();
 
 /**
  * Scrapes an animal adoption page and extracts relevant information

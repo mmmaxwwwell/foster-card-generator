@@ -5,6 +5,7 @@ const path = require('path');
 const QRCode = require('qrcode');
 const Handlebars = require('handlebars');
 const fsSync = require('fs');
+const { getOutputDir } = require('./paths.js');
 
 // Enable verbose logging
 console.log('[Card Gen] Script started');
@@ -189,9 +190,8 @@ async function generateCardFront(params) {
     await page.goto(htmlPath, { waitUntil: 'networkidle0' });
     console.log('[Card Gen] Page loaded');
 
-    // Ensure output directory exists - use user's data directory
-    const homeDir = process.env.HOME || require('os').homedir();
-    const outputDir = path.join(homeDir, '.local', 'share', 'foster-card-generator', 'output');
+    // Ensure output directory exists - use cross-platform data directory
+    const outputDir = getOutputDir();
     console.log('[Card Gen] Creating output directory:', outputDir);
     await fs.mkdir(outputDir, { recursive: true });
 
@@ -236,9 +236,8 @@ async function generateCardBack(params) {
     await page.goto(htmlPath, { waitUntil: 'networkidle0' });
     console.log('[Card Gen] Page loaded');
 
-    // Ensure output directory exists - use user's data directory
-    const homeDir = process.env.HOME || require('os').homedir();
-    const outputDir = path.join(homeDir, '.local', 'share', 'foster-card-generator', 'output');
+    // Ensure output directory exists - use cross-platform data directory
+    const outputDir = getOutputDir();
     console.log('[Card Gen] Creating output directory:', outputDir);
     await fs.mkdir(outputDir, { recursive: true });
 

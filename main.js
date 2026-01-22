@@ -1,8 +1,10 @@
 const { app, BrowserWindow, ipcMain, shell } = require('electron');
 const path = require('path');
 const fs = require('fs');
-const os = require('os');
 const { exec } = require('child_process');
+
+// Cross-platform paths
+const { ensureDirectories } = require('./app/paths.js');
 
 // Load scrapers in main process where puppeteer works properly
 const { scrapeAnimalPage: scrapeWagtopia } = require('./app/scrape-url-wagtopia.js');
@@ -14,11 +16,7 @@ const { scrapeAnimalList: scrapeListAdoptapet, buildShelterUrl: buildAdoptapetUr
 let mainWindow;
 
 // Data directories - ensure they exist before window loads
-const DATA_DIR = path.join(os.homedir(), '.local', 'share', 'foster-card-generator');
-const dirs = [DATA_DIR, path.join(DATA_DIR, 'tmp'), path.join(DATA_DIR, 'output')];
-for (const dir of dirs) {
-    fs.mkdirSync(dir, { recursive: true });
-}
+ensureDirectories();
 
 function createWindow() {
     mainWindow = new BrowserWindow({
