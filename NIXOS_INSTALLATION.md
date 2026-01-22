@@ -29,7 +29,29 @@ Add the flake to your NixOS configuration:
 }
 ```
 
-### Method 2: Direct Package Installation
+### Method 2: Using package.nix (Simple, no flake required)
+
+Import the package directly in your NixOS configuration using `package.nix`:
+
+```nix
+{ lib, config, pkgs, ... }:
+
+let
+  foster-card-generator = import /path/to/foster-card-generator/package.nix { inherit pkgs; };
+in
+{
+  environment.systemPackages = [
+    foster-card-generator
+  ];
+}
+```
+
+This method:
+- Works without enabling flakes
+- Uses your system's `nixpkgs` version
+- Can be used in any NixOS module file (e.g., `configuration.nix` or a separate module)
+
+### Method 3: Direct Flake Package Installation
 
 Add to your `configuration.nix` or home-manager configuration:
 
@@ -41,7 +63,7 @@ Add to your `configuration.nix` or home-manager configuration:
 }
 ```
 
-### Method 3: User Profile Installation
+### Method 4: User Profile Installation
 
 Install to your user profile:
 
@@ -49,7 +71,7 @@ Install to your user profile:
 nix profile install .#foster-card-generator
 ```
 
-### Method 4: Temporary Shell
+### Method 5: Temporary Shell
 
 Try it out without installing:
 
