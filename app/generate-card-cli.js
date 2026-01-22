@@ -2,6 +2,7 @@ const tmp = require('tmp');
 const fs = require('fs').promises;
 const { rimraf } = require('rimraf');
 const path = require('path');
+const os = require('os');
 const QRCode = require('qrcode');
 const Handlebars = require('handlebars');
 const fsSync = require('fs');
@@ -15,7 +16,7 @@ console.log('[Card Gen] Script location:', __dirname);
 async function createTempDir(params) {
     console.log('[Card Gen] Creating temporary directory...');
     return new Promise((resolve, reject) => {
-        tmp.dir({ prefix: 'foster-card-', tmpdir: '/tmp' }, (err, tmpPath, cleanupCallback) => {
+        tmp.dir({ prefix: 'foster-card-', tmpdir: os.tmpdir() }, (err, tmpPath, cleanupCallback) => {
             if (err) {
                 console.error('[Card Gen] Error creating temp directory:', err);
                 reject(err);

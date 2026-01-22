@@ -3,6 +3,7 @@ const tmp = require('tmp');
 const fs = require('fs').promises;
 const { rimraf } = require('rimraf');
 const path = require('path');
+const os = require('os');
 const yaml = require('js-yaml');
 const fsSync = require('fs');
 const QRCode = require('qrcode');
@@ -10,7 +11,7 @@ const Handlebars = require('handlebars');
 
 async function createTempDir(params) {
     return new Promise((resolve, reject) => {
-        tmp.dir({ prefix: 'foster-card-', tmpdir: '/tmp' }, (err, tmpPath, cleanupCallback) => {
+        tmp.dir({ prefix: 'foster-card-', tmpdir: os.tmpdir() }, (err, tmpPath, cleanupCallback) => {
             if (err) {
                 reject(err);
             } else {
