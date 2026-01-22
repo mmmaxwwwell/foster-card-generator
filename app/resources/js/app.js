@@ -137,7 +137,7 @@ async function setupPaths() {
 
     try {
         // Initialize database (this also creates directories)
-        const { dbDir, dbPath } = db.initialize();
+        const { dbDir, dbPath } = await db.initializeAsync();
         DB_DIR = dbDir;
         DB_PATH = dbPath;
 
@@ -1488,7 +1488,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                 <div class="error">
                     <h3>Initialization Failed</h3>
                     <p>${err.message}</p>
-                    <p>Please ensure better-sqlite3 is installed correctly.</p>
+                    <p>Please ensure sql.js is installed correctly.</p>
                 </div>
             `;
         }

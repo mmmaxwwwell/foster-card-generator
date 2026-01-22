@@ -1,26 +1,46 @@
 /**
  * Database module for foster-card-generator
  * Encapsulates all SQLite database operations
+ * Uses sql.js (pure JavaScript, no native compilation required)
  */
 
 const path = require('path');
 const fs = require('fs');
 const { getDataDir } = require('./paths.js');
 
-// Try to load better-sqlite3
-let Database = null;
+// Load sql.js
+let initSqlJs = null;
 let databaseLoadError = null;
+let wasmPath = null;
+
 try {
-    Database = require('better-sqlite3');
+    initSqlJs = require('sql.js');
+    // Locate the WASM file - try multiple possible locations
+    const possiblePaths = [
+        path.join(__dirname, '..', 'node_modules', 'sql.js', 'dist', 'sql-wasm.wasm'),
+        path.join(__dirname, '..', '..', 'node_modules', 'sql.js', 'dist', 'sql-wasm.wasm'),
+        path.join(process.cwd(), 'node_modules', 'sql.js', 'dist', 'sql-wasm.wasm'),
+    ];
+    for (const p of possiblePaths) {
+        if (fs.existsSync(p)) {
+            wasmPath = p;
+            console.log('[DB] Found sql.js WASM at:', wasmPath);
+            break;
+        }
+    }
+    if (!wasmPath) {
+        console.error('[DB] Could not find sql-wasm.wasm file');
+    }
 } catch (err) {
     databaseLoadError = err;
-    console.error('[DB] Failed to load better-sqlite3:', err.message);
+    console.error('[DB] Failed to load sql.js:', err.message);
 }
 
 // Database state
 let db = null;
 let DB_PATH = null;
 let DB_DIR = null;
+let initPromise = null;
 
 /**
  * Get the database directory path
@@ -44,32 +64,79 @@ function isConnected() {
 }
 
 /**
- * Initialize database connection and ensure schema exists
- * @returns {Object} - { dbDir, dbPath } paths used
+ * Save database to disk
  */
-function initialize() {
+function saveDatabase() {
+    if (!db || !DB_PATH) return;
+    const data = db.export();
+    const buffer = Buffer.from(data);
+    fs.writeFileSync(DB_PATH, buffer);
+}
+
+/**
+ * Initialize database connection and ensure schema exists (async)
+ * @returns {Promise<Object>} - { dbDir, dbPath } paths used
+ */
+async function initializeAsync() {
     DB_DIR = getDataDir();
     DB_PATH = path.join(DB_DIR, 'animals.db');
 
     // Create directory if needed
     fs.mkdirSync(DB_DIR, { recursive: true });
 
-    // Check if better-sqlite3 is available
-    if (!Database) {
+    // Check if sql.js is available
+    if (!initSqlJs) {
         const errMsg = databaseLoadError
-            ? `better-sqlite3 failed to load: ${databaseLoadError.message}`
-            : 'better-sqlite3 module not available';
+            ? `sql.js failed to load: ${databaseLoadError.message}`
+            : 'sql.js module not available';
         throw new Error(errMsg);
     }
 
-    // Open database connection
-    db = new Database(DB_PATH);
-    db.pragma('journal_mode = WAL');
+    // Initialize sql.js (async) with explicit WASM binary
+    let SQL;
+    if (wasmPath) {
+        // Load WASM binary directly from filesystem
+        const wasmBinary = fs.readFileSync(wasmPath);
+        SQL = await initSqlJs({ wasmBinary });
+    } else {
+        // Fallback to default loading (may not work in Electron)
+        SQL = await initSqlJs();
+    }
+
+    // Load existing database or create new one
+    if (fs.existsSync(DB_PATH)) {
+        const fileBuffer = fs.readFileSync(DB_PATH);
+        db = new SQL.Database(fileBuffer);
+    } else {
+        db = new SQL.Database();
+    }
 
     // Ensure schema exists
     ensureSchema();
 
+    // Save after schema changes
+    saveDatabase();
+
     return { dbDir: DB_DIR, dbPath: DB_PATH };
+}
+
+/**
+ * Initialize database connection (maintains sync API by caching promise)
+ * Call this and await it, or call initializeAsync directly
+ * @returns {Object} - { dbDir, dbPath } paths used
+ */
+function initialize() {
+    if (db) {
+        return { dbDir: DB_DIR, dbPath: DB_PATH };
+    }
+
+    if (!initPromise) {
+        initPromise = initializeAsync();
+    }
+
+    // For sync compatibility, throw if not yet initialized
+    // Callers should use initializeAsync() or await initialize()
+    throw new Error('Database requires async initialization. Use: await db.initializeAsync()');
 }
 
 /**
@@ -77,12 +144,12 @@ function initialize() {
  */
 function ensureSchema() {
     // Check if rescues table exists
-    const rescuesExists = db.prepare(
+    const rescuesResult = db.exec(
         "SELECT name FROM sqlite_master WHERE type='table' AND name='rescues'"
-    ).get();
+    );
 
-    if (!rescuesExists) {
-        db.exec(`
+    if (rescuesResult.length === 0) {
+        db.run(`
             CREATE TABLE IF NOT EXISTS rescues (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 name TEXT NOT NULL,
@@ -91,20 +158,22 @@ function ensureSchema() {
                 org_id TEXT,
                 scraper_type TEXT NOT NULL,
                 created_at TEXT DEFAULT (datetime('now'))
-            );
+            )
+        `);
 
+        db.run(`
             INSERT OR IGNORE INTO rescues (id, name, website, logo_path, org_id, scraper_type) VALUES
                 (1, 'Paws Rescue League', 'pawsrescueleague.org', 'logo.png', '1841035', 'wagtopia'),
-                (2, 'Brass City Rescue', 'brasscityrescuealliance.org', 'brass-city-logo.jpg', '87063', 'adoptapet');
+                (2, 'Brass City Rescue', 'brasscityrescuealliance.org', 'brass-city-logo.jpg', '87063', 'adoptapet')
         `);
     }
 
-    const tableExists = db.prepare(
+    const tableResult = db.exec(
         "SELECT name FROM sqlite_master WHERE type='table' AND name='animals'"
-    ).get();
+    );
 
-    if (!tableExists) {
-        db.exec(`
+    if (tableResult.length === 0) {
+        db.run(`
             CREATE TABLE IF NOT EXISTS animals (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 name TEXT NOT NULL,
@@ -126,26 +195,31 @@ function ensureSchema() {
                 created_at TEXT DEFAULT (datetime('now')),
                 updated_at TEXT DEFAULT (datetime('now')),
                 FOREIGN KEY (rescue_id) REFERENCES rescues(id)
-            );
+            )
+        `);
 
-            CREATE INDEX IF NOT EXISTS idx_animals_name ON animals(name);
-            CREATE INDEX IF NOT EXISTS idx_animals_rescue ON animals(rescue_id);
+        db.run(`CREATE INDEX IF NOT EXISTS idx_animals_name ON animals(name)`);
+        db.run(`CREATE INDEX IF NOT EXISTS idx_animals_rescue ON animals(rescue_id)`);
 
+        db.run(`
             CREATE TRIGGER IF NOT EXISTS update_animals_timestamp
             AFTER UPDATE ON animals
             BEGIN
                 UPDATE animals SET updated_at = datetime('now') WHERE id = NEW.id;
-            END;
+            END
         `);
         return true; // Schema was created
     }
 
     // Check if rescue_id column exists, add it if not (migration for existing databases)
-    const columns = db.prepare("PRAGMA table_info(animals)").all();
-    const hasRescueId = columns.some(col => col.name === 'rescue_id');
-    if (!hasRescueId) {
-        db.exec(`ALTER TABLE animals ADD COLUMN rescue_id INTEGER DEFAULT 1`);
-        console.log('[DB] Added rescue_id column to existing animals table');
+    const columnsResult = db.exec("PRAGMA table_info(animals)");
+    if (columnsResult.length > 0) {
+        const columns = columnsResult[0].values;
+        const hasRescueId = columns.some(col => col[1] === 'rescue_id');
+        if (!hasRescueId) {
+            db.run(`ALTER TABLE animals ADD COLUMN rescue_id INTEGER DEFAULT 1`);
+            console.log('[DB] Added rescue_id column to existing animals table');
+        }
     }
 
     return false; // Schema already existed
@@ -156,8 +230,10 @@ function ensureSchema() {
  */
 function close() {
     if (db) {
+        saveDatabase();
         db.close();
         db = null;
+        initPromise = null;
     }
 }
 
@@ -167,7 +243,8 @@ function close() {
  */
 function exec(sql) {
     if (!db) throw new Error('Database not initialized');
-    db.exec(sql);
+    db.run(sql);
+    saveDatabase();
 }
 
 /**
@@ -177,7 +254,18 @@ function exec(sql) {
  */
 function queryAll(sql) {
     if (!db) throw new Error('Database not initialized');
-    return db.prepare(sql).all();
+    const result = db.exec(sql);
+    if (result.length === 0) return [];
+
+    // Convert to array of objects
+    const columns = result[0].columns;
+    return result[0].values.map(row => {
+        const obj = {};
+        columns.forEach((col, i) => {
+            obj[col] = row[i];
+        });
+        return obj;
+    });
 }
 
 /**
@@ -186,8 +274,61 @@ function queryAll(sql) {
  * @returns {Object|undefined} - First result row or undefined
  */
 function queryOne(sql) {
+    const results = queryAll(sql);
+    return results.length > 0 ? results[0] : undefined;
+}
+
+/**
+ * Run a prepared statement with parameters
+ * @param {string} sql - SQL statement with ? placeholders
+ * @param {Array} params - Parameter values
+ * @returns {Object} - Result with lastInsertRowid and changes
+ */
+function runPrepared(sql, params) {
     if (!db) throw new Error('Database not initialized');
-    return db.prepare(sql).get();
+
+    const stmt = db.prepare(sql);
+    stmt.bind(params);
+    stmt.step();
+    stmt.free();
+
+    // Get last insert rowid
+    const lastIdResult = db.exec("SELECT last_insert_rowid()");
+    const lastInsertRowid = lastIdResult.length > 0 ? lastIdResult[0].values[0][0] : 0;
+
+    // Get changes count
+    const changesResult = db.exec("SELECT changes()");
+    const changes = changesResult.length > 0 ? changesResult[0].values[0][0] : 0;
+
+    saveDatabase();
+
+    return { lastInsertRowid, changes };
+}
+
+/**
+ * Query with prepared statement and return first result
+ * @param {string} sql - SQL query with ? placeholders
+ * @param {Array} params - Parameter values
+ * @returns {Object|undefined} - First result row or undefined
+ */
+function queryOnePrepared(sql, params) {
+    if (!db) throw new Error('Database not initialized');
+
+    const stmt = db.prepare(sql);
+    stmt.bind(params);
+
+    let result = undefined;
+    if (stmt.step()) {
+        const columns = stmt.getColumnNames();
+        const values = stmt.get();
+        result = {};
+        columns.forEach((col, i) => {
+            result[col] = values[i];
+        });
+    }
+    stmt.free();
+
+    return result;
 }
 
 // ============================================================
@@ -214,14 +355,13 @@ function getAllAnimals() {
  * @returns {Object|undefined} - Animal object or undefined
  */
 function getAnimalById(id) {
-    if (!db) throw new Error('Database not initialized');
-    return db.prepare(`
+    return queryOnePrepared(`
         SELECT id, name, slug, size, shots, housetrained, breed,
                age_long, age_short, gender, kids, dogs, cats,
                portrait_path, portrait_mime, rescue_id
         FROM animals
         WHERE id = ?
-    `).get(id);
+    `, [id]);
 }
 
 /**
@@ -232,16 +372,18 @@ function getAnimalById(id) {
 function getImageAsDataUrl(animalId) {
     if (!db) throw new Error('Database not initialized');
 
-    const row = db.prepare(
-        'SELECT portrait_mime, portrait_data FROM animals WHERE id = ?'
-    ).get(animalId);
+    const row = queryOnePrepared(
+        'SELECT portrait_mime, portrait_data FROM animals WHERE id = ?',
+        [animalId]
+    );
 
     if (!row || !row.portrait_mime || !row.portrait_data) {
         return null;
     }
 
-    // portrait_data is a Buffer in better-sqlite3, convert to base64
-    const base64 = row.portrait_data.toString('base64');
+    // portrait_data is a Uint8Array in sql.js, convert to base64
+    const buffer = Buffer.from(row.portrait_data);
+    const base64 = buffer.toString('base64');
     return `data:${row.portrait_mime};base64,${base64}`;
 }
 
@@ -257,18 +399,16 @@ function createAnimal(animal, imageData = null) {
     const rescueId = animal.rescue_id || 1;
 
     if (imageData) {
-        const stmt = db.prepare(`
+        // Convert hex string to Uint8Array for the BLOB
+        const imageBuffer = Buffer.from(imageData.hex, 'hex');
+
+        return runPrepared(`
             INSERT INTO animals (
                 name, breed, slug, age_long, age_short, size, gender,
                 shots, housetrained, kids, dogs, cats,
                 portrait_path, portrait_mime, portrait_data, rescue_id
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        `);
-
-        // Convert hex string to buffer for the BLOB
-        const imageBuffer = Buffer.from(imageData.hex, 'hex');
-
-        return stmt.run(
+        `, [
             animal.name,
             animal.breed,
             animal.slug,
@@ -285,16 +425,14 @@ function createAnimal(animal, imageData = null) {
             imageData.mime,
             imageBuffer,
             rescueId
-        );
+        ]);
     } else {
-        const stmt = db.prepare(`
+        return runPrepared(`
             INSERT INTO animals (
                 name, breed, slug, age_long, age_short, size, gender,
                 shots, housetrained, kids, dogs, cats, rescue_id
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        `);
-
-        return stmt.run(
+        `, [
             animal.name,
             animal.breed,
             animal.slug,
@@ -308,7 +446,7 @@ function createAnimal(animal, imageData = null) {
             animal.dogs,
             animal.cats,
             rescueId
-        );
+        ]);
     }
 }
 
@@ -325,19 +463,17 @@ function updateAnimal(id, animal, imageData = null) {
     const rescueId = animal.rescue_id || 1;
 
     if (imageData) {
-        const stmt = db.prepare(`
+        // Convert hex string to Uint8Array for the BLOB
+        const imageBuffer = Buffer.from(imageData.hex, 'hex');
+
+        return runPrepared(`
             UPDATE animals SET
                 name = ?, breed = ?, slug = ?, age_long = ?, age_short = ?,
                 size = ?, gender = ?, shots = ?, housetrained = ?,
                 kids = ?, dogs = ?, cats = ?,
                 portrait_path = ?, portrait_mime = ?, portrait_data = ?, rescue_id = ?
             WHERE id = ?
-        `);
-
-        // Convert hex string to buffer for the BLOB
-        const imageBuffer = Buffer.from(imageData.hex, 'hex');
-
-        return stmt.run(
+        `, [
             animal.name,
             animal.breed,
             animal.slug,
@@ -355,17 +491,15 @@ function updateAnimal(id, animal, imageData = null) {
             imageBuffer,
             rescueId,
             id
-        );
+        ]);
     } else {
-        const stmt = db.prepare(`
+        return runPrepared(`
             UPDATE animals SET
                 name = ?, breed = ?, slug = ?, age_long = ?, age_short = ?,
                 size = ?, gender = ?, shots = ?, housetrained = ?,
                 kids = ?, dogs = ?, cats = ?, rescue_id = ?
             WHERE id = ?
-        `);
-
-        return stmt.run(
+        `, [
             animal.name,
             animal.breed,
             animal.slug,
@@ -380,7 +514,7 @@ function updateAnimal(id, animal, imageData = null) {
             animal.cats,
             rescueId,
             id
-        );
+        ]);
     }
 }
 
@@ -391,7 +525,7 @@ function updateAnimal(id, animal, imageData = null) {
  */
 function deleteAnimal(id) {
     if (!db) throw new Error('Database not initialized');
-    return db.prepare('DELETE FROM animals WHERE id = ?').run(id);
+    return runPrepared('DELETE FROM animals WHERE id = ?', [id]);
 }
 
 /**
@@ -402,13 +536,12 @@ function deleteAnimal(id) {
 function deleteAnimals(ids) {
     if (!db) throw new Error('Database not initialized');
 
-    const stmt = db.prepare('DELETE FROM animals WHERE id = ?');
     let successCount = 0;
     let failCount = 0;
 
     for (const id of ids) {
         try {
-            const result = stmt.run(id);
+            const result = runPrepared('DELETE FROM animals WHERE id = ?', [id]);
             if (result.changes > 0) {
                 successCount++;
             } else {
@@ -445,12 +578,11 @@ function getAllRescues() {
  * @returns {Object|undefined} - Rescue object or undefined
  */
 function getRescueById(id) {
-    if (!db) throw new Error('Database not initialized');
-    return db.prepare(`
+    return queryOnePrepared(`
         SELECT id, name, website, logo_path, org_id, scraper_type
         FROM rescues
         WHERE id = ?
-    `).get(id);
+    `, [id]);
 }
 
 /**
@@ -459,18 +591,18 @@ function getRescueById(id) {
  * @returns {Object|undefined} - Rescue object or undefined
  */
 function getRescueByScraperType(scraperType) {
-    if (!db) throw new Error('Database not initialized');
-    return db.prepare(`
+    return queryOnePrepared(`
         SELECT id, name, website, logo_path, org_id, scraper_type
         FROM rescues
         WHERE scraper_type = ?
-    `).get(scraperType);
+    `, [scraperType]);
 }
 
 // Export all functions
 module.exports = {
     // Connection management
     initialize,
+    initializeAsync,
     close,
     isConnected,
     getDbDir,

@@ -103,33 +103,23 @@ ipcMain.handle('scrape-animal-list-adoptapet', async (event, shelterId) => {
     }
 });
 
-// IPC handler for opening files in GIMP (Linux/macOS) or print dialog (Windows)
+// IPC handler for opening files in GIMP (Linux/macOS) or opening image (Windows)
 ipcMain.handle('open-in-gimp', async (event, filePath) => {
     if (process.platform === 'win32') {
-        // Windows: Open print dialog using PowerShell's Start-Process with -Verb Print
-        console.log('[Main] Opening Windows print dialog for:', filePath);
-        return new Promise((resolve) => {
-            const psCommand = `Start-Process -FilePath "${filePath}" -Verb Print`;
-            exec(`powershell -Command "${psCommand}"`, (err, stdout, stderr) => {
-                if (err) {
-                    console.error('[Main] Print error:', err.message);
-                    if (stderr) console.error('[Main] Print stderr:', stderr);
-                    // Fallback: open with default app and let user print manually
-                    console.log('[Main] Falling back to opening file with default app');
-                    shell.openPath(filePath).then((result) => {
-                        if (result) {
-                            console.error('[Main] Shell open error:', result);
-                            resolve({ success: false, error: result });
-                        } else {
-                            resolve({ success: true });
-                        }
-                    });
-                } else {
-                    console.log('[Main] Print dialog opened successfully');
-                    resolve({ success: true });
-                }
-            });
-        });
+        // Windows: Open with default image viewer
+        console.log('[Main] Opening image on Windows:', filePath);
+        try {
+            const result = await shell.openPath(filePath);
+            if (result) {
+                console.error('[Main] Shell open error:', result);
+                return { success: false, error: result };
+            }
+            console.log('[Main] Opened with default app successfully');
+            return { success: true };
+        } catch (err) {
+            console.error('[Main] Error opening file:', err);
+            return { success: false, error: err.message };
+        }
     } else {
         // Linux/macOS: Use GIMP from PATH
         return new Promise((resolve) => {
