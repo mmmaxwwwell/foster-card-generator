@@ -7,6 +7,8 @@ const { exec } = require('child_process');
 // Load scrapers in main process where puppeteer works properly
 const { scrapeAnimalPage: scrapeWagtopia } = require('./app/scrape-url-wagtopia.js');
 const { scrapeAnimalPage: scrapeAdoptapet } = require('./app/scrape-url-adoptapet.js');
+const { scrapeAnimalList: scrapeListWagtopia } = require('./app/scrape-list-wagtopia.js');
+const { scrapeAnimalList: scrapeListAdoptapet, buildShelterUrl: buildAdoptapetUrl } = require('./app/scrape-list-adoptapet.js');
 
 // Keep a global reference of the window object
 let mainWindow;
@@ -75,6 +77,28 @@ ipcMain.handle('scrape-animal-page-wagtopia', async (event, url) => {
 ipcMain.handle('scrape-animal-page-adoptapet', async (event, url) => {
     try {
         const result = await scrapeAdoptapet(url);
+        return { success: true, data: result };
+    } catch (error) {
+        return { success: false, error: error.message };
+    }
+});
+
+// IPC handler for scraping animal lists (Wagtopia)
+ipcMain.handle('scrape-animal-list-wagtopia', async (event, orgId) => {
+    try {
+        const url = `https://www.wagtopia.com/search/org?id=${orgId}&iframe=normal`;
+        const result = await scrapeListWagtopia(url);
+        return { success: true, data: result };
+    } catch (error) {
+        return { success: false, error: error.message };
+    }
+});
+
+// IPC handler for scraping animal lists (Adoptapet)
+ipcMain.handle('scrape-animal-list-adoptapet', async (event, shelterId) => {
+    try {
+        const url = buildAdoptapetUrl(shelterId);
+        const result = await scrapeListAdoptapet(url);
         return { success: true, data: result };
     } catch (error) {
         return { success: false, error: error.message };

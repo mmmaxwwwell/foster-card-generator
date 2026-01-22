@@ -8,9 +8,6 @@ let TMP_DIR = null;
 // Node.js modules for Electron
 const fs = require('fs');
 const path = require('path');
-const { exec } = require('child_process');
-const { promisify } = require('util');
-const execAsync = promisify(exec);
 
 // Database module
 const db = require('../db.js');
@@ -1233,33 +1230,24 @@ async function openSelectFromSiteModal() {
         }
         console.log('[App] Using rescue:', rescue.name, 'org_id:', rescue.org_id);
 
-        // Call the appropriate scraper script based on selected rescue
-        let scriptName;
+        // Call the appropriate list scraper via IPC (runs in main process where Puppeteer works)
+        let ipcChannel;
         if (selectedRescue === 'adoptapet') {
-            scriptName = 'scrape-list-adoptapet.js';
+            ipcChannel = 'scrape-animal-list-adoptapet';
         } else {
-            scriptName = 'scrape-list-wagtopia.js';
+            ipcChannel = 'scrape-animal-list-wagtopia';
         }
-        // Pass the org_id directly to the scraper (it will build the URL)
-        const command = `node ${scriptName} "${rescue.org_id}"`;
-        console.log('[App] Executing list scraper command:', command);
+        console.log('[App] Calling IPC list scraper:', ipcChannel, 'with org_id:', rescue.org_id);
 
-        const result = await execAsync(command, { cwd: path.join(APP_PATH, 'app') });
+        const result = await ipcRenderer.invoke(ipcChannel, rescue.org_id);
 
         console.log('[App] List scraper completed');
 
-        // Log stderr (debug messages from scraper)
-        if (result.stderr) {
-            const lines = result.stderr.split('\n');
-            for (const line of lines) {
-                if (line.trim()) {
-                    console.log('[List Scraper]', line);
-                }
-            }
+        if (!result.success) {
+            throw new Error(result.error);
         }
 
-        // Parse the scraped list from stdout
-        scrapedAnimals = JSON.parse(result.stdout.trim());
+        scrapedAnimals = result.data;
         console.log('[App] Scraped', scrapedAnimals.length, 'animals');
 
         if (scrapedAnimals.length === 0) {
