@@ -103,71 +103,56 @@ ipcMain.handle('scrape-animal-list-adoptapet', async (event, shelterId) => {
     }
 });
 
-// IPC handler for opening files in GIMP (cross-platform)
+// IPC handler for opening files in GIMP (Linux/macOS) or print dialog (Windows)
 ipcMain.handle('open-in-gimp', async (event, filePath) => {
-    return new Promise((resolve) => {
-        let gimpCommand;
-
-        if (process.platform === 'win32') {
-            // Windows: Try common GIMP installation paths (including GIMP 3.x)
-            const possiblePaths = [
-                // GIMP 3.x paths
-                path.join(process.env['ProgramFiles'] || 'C:\\Program Files', 'GIMP 3', 'bin', 'gimp-3.0.exe'),
-                path.join(process.env['ProgramFiles(x86)'] || 'C:\\Program Files (x86)', 'GIMP 3', 'bin', 'gimp-3.0.exe'),
-                path.join(process.env['ProgramFiles'] || 'C:\\Program Files', 'GIMP 3', 'bin', 'gimp.exe'),
-                path.join(process.env['LOCALAPPDATA'] || '', 'Programs', 'GIMP 3', 'bin', 'gimp-3.0.exe'),
-                // GIMP 2.x paths
-                path.join(process.env['ProgramFiles'] || 'C:\\Program Files', 'GIMP 2', 'bin', 'gimp-2.10.exe'),
-                path.join(process.env['ProgramFiles(x86)'] || 'C:\\Program Files (x86)', 'GIMP 2', 'bin', 'gimp-2.10.exe'),
-                path.join(process.env['ProgramFiles'] || 'C:\\Program Files', 'GIMP 2', 'bin', 'gimp.exe'),
-                path.join(process.env['LOCALAPPDATA'] || '', 'Programs', 'GIMP 2', 'bin', 'gimp-2.10.exe'),
-            ];
-
-            gimpCommand = null;
-            for (const gimpPath of possiblePaths) {
-                if (fs.existsSync(gimpPath)) {
-                    gimpCommand = `"${gimpPath}"`;
-                    break;
+    if (process.platform === 'win32') {
+        // Windows: Open the system print dialog
+        console.log('[Main] Opening Windows print dialog for:', filePath);
+        return new Promise((resolve) => {
+            exec(`rundll32 shimgvw.dll,ImageView_PrintTo "${filePath}"`, (err) => {
+                if (err) {
+                    console.error('[Main] Print dialog error:', err.message);
+                    // Fallback: just open the file with default viewer
+                    shell.openPath(filePath).then(() => {
+                        resolve({ success: true });
+                    }).catch((shellErr) => {
+                        console.error('[Main] Shell open error:', shellErr);
+                        resolve({ success: false, error: shellErr.message });
+                    });
+                } else {
+                    resolve({ success: true });
                 }
-            }
-
-            if (!gimpCommand) {
-                console.log('[Main] No GIMP installation found in common paths, falling back to PATH');
-                gimpCommand = 'gimp';
-            } else {
-                console.log('[Main] Found GIMP at:', gimpCommand);
-            }
-        } else {
-            // Linux/macOS: Use 'gimp' from PATH
-            gimpCommand = 'gimp';
-        }
-
-        const fullCommand = `${gimpCommand} "${filePath}"`;
-        console.log('[Main] Launching GIMP with command:', fullCommand);
-
-        // Clear Electron's LD_LIBRARY_PATH to avoid library conflicts on Linux
-        const env = { ...process.env };
-        if (process.platform !== 'win32') {
-            delete env.LD_LIBRARY_PATH;
-        }
-
-        const child = exec(fullCommand, { env }, (err, stdout, stderr) => {
-            if (err) {
-                console.error('[Main] GIMP exec error:', err.message);
-                if (stderr) console.error('[Main] GIMP stderr:', stderr);
-            }
-            if (stdout) console.log('[Main] GIMP stdout:', stdout);
+            });
         });
+    } else {
+        // Linux/macOS: Use GIMP from PATH
+        return new Promise((resolve) => {
+            const gimpCommand = 'gimp';
+            const fullCommand = `${gimpCommand} "${filePath}"`;
+            console.log('[Main] Launching GIMP with command:', fullCommand);
 
-        // Give it a moment to check if the process spawned
-        setTimeout(() => {
-            if (child.pid) {
-                console.log('[Main] GIMP process started with PID:', child.pid);
-                resolve({ success: true });
-            } else {
-                console.error('[Main] GIMP process failed to start');
-                resolve({ success: false, error: 'Failed to start GIMP process' });
-            }
-        }, 500);
-    });
+            // Clear Electron's LD_LIBRARY_PATH to avoid library conflicts on Linux
+            const env = { ...process.env };
+            delete env.LD_LIBRARY_PATH;
+
+            const child = exec(fullCommand, { env }, (err, stdout, stderr) => {
+                if (err) {
+                    console.error('[Main] GIMP exec error:', err.message);
+                    if (stderr) console.error('[Main] GIMP stderr:', stderr);
+                }
+                if (stdout) console.log('[Main] GIMP stdout:', stdout);
+            });
+
+            // Give it a moment to check if the process spawned
+            setTimeout(() => {
+                if (child.pid) {
+                    console.log('[Main] GIMP process started with PID:', child.pid);
+                    resolve({ success: true });
+                } else {
+                    console.error('[Main] GIMP process failed to start');
+                    resolve({ success: false, error: 'Failed to start GIMP process' });
+                }
+            }, 500);
+        });
+    }
 });
