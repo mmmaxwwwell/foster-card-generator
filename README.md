@@ -185,16 +185,17 @@ Click **Save Profile** to store the calibration data. Future prints will automat
 Each generated card includes:
 
 **Front of Card:**
+- Rescue organization logo
+- Rescue organization url
 - Large animal portrait photo
 - Animal's name
-- Key details (breed, age, size)
+- Animal's age
+- Animal's breed
 
 **Back of Card:**
-- Detailed information
 - Compatibility information (kids, dogs, cats)
 - Vaccination and house-training status
 - QR code linking to the animal's adoption profile
-- Rescue organization logo
 
 Cards are designed to print on [Avery 8471 Business Card](https://www.amazon.com/Avery-Printable-Business-Printers-Heavyweight/dp/B00006HQU9) templates (10 cards per sheet, US Letter size) at 360 DPI for professional print quality.
 
