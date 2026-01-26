@@ -65,13 +65,14 @@
           ]
         }
       ],
-      "icon": "src/icon.ico"
+      "icon": "src/icon_small.ico"
     },
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
-      "installerIcon": "src/icon.ico",
-      "uninstallerIcon": "src/icon.ico"
+      "installerIcon": "src/icon_small.ico",
+      "uninstallerIcon": "src/icon_small.ico",
+      "installerSidebar": "src/logo.png"
     },
     "portable": {
       "artifactName": "${productName}-${version}-portable.exe"
