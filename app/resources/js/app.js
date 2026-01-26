@@ -127,6 +127,23 @@ function closeDebugModal() {
     document.getElementById('debugModal').classList.remove('active');
 }
 
+// Delete database and reload app (for recovery from corrupted database)
+async function deleteDatabaseAndReload() {
+    if (!confirm('Are you sure you want to delete the database? This will remove all your animals and settings. The app will reload with a fresh database.')) {
+        return;
+    }
+
+    try {
+        const result = await ipcRenderer.invoke('delete-database-and-reload');
+        if (!result.success) {
+            alert('Failed to delete database: ' + result.error);
+        }
+        // App will reload automatically if successful
+    } catch (err) {
+        alert('Error: ' + err.message);
+    }
+}
+
 // Paths derived from database module
 let DB_DIR = null;
 let DB_PATH = null;
@@ -218,10 +235,17 @@ function showToast(message, type = 'success') {
     setTimeout(() => toast.remove(), 3000);
 }
 
-function renderAnimalCard(animal) {
+function renderAnimalCard(animal, rescue) {
     const kids = formatCompatibility(animal.kids);
     const dogs = formatCompatibility(animal.dogs);
     const cats = formatCompatibility(animal.cats);
+
+    // Build logo path from src directory
+    const srcDir = path.join(__dirname, '..', '..', 'src');
+    const logoPath = rescue ? path.join(srcDir, rescue.logo_path) : null;
+    const logoDataUrl = logoPath && fs.existsSync(logoPath)
+        ? `data:image/${rescue.logo_path.endsWith('.png') ? 'png' : 'jpeg'};base64,${fs.readFileSync(logoPath).toString('base64')}`
+        : null;
 
     return `
         <div class="animal-card" data-id="${animal.id}">
@@ -229,6 +253,10 @@ function renderAnimalCard(animal) {
                 ${animal.imageDataUrl
                     ? `<img class="animal-image" src="${animal.imageDataUrl}" alt="${animal.name}">`
                     : `<div class="no-image">🐕</div>`
+                }
+                ${logoDataUrl
+                    ? `<img class="rescue-logo-badge" src="${logoDataUrl}" alt="${rescue.name}" title="${rescue.name}">`
+                    : ''
                 }
             </div>
             <div class="animal-info">
@@ -313,20 +341,32 @@ async function loadAnimals() {
             animal.imageDataUrl = db.getImageAsDataUrl(animal.id);
         }
 
-        // Render all cards
+        // Render all cards with their rescue info
         content.innerHTML = `
             <div class="animals-grid">
-                ${animals.map(renderAnimalCard).join('')}
+                ${animals.map(animal => {
+                    const rescue = rescues.find(r => r.id === animal.rescue_id);
+                    return renderAnimalCard(animal, rescue);
+                }).join('')}
             </div>
         `;
 
     } catch (err) {
         console.error('Error loading animals:', err);
+        const dbPathDisplay = DB_PATH || 'Unknown (not initialized)';
         content.innerHTML = `
             <div class="error">
                 <h3>Error loading animals</h3>
                 <p>${err.message}</p>
                 <p>Make sure sqlite3 is available and the database exists.</p>
+                <p style="margin-top: 15px; font-size: 12px; color: #666;">
+                    <strong>Database location:</strong><br>
+                    <code style="background: rgba(0,0,0,0.1); padding: 4px 8px; border-radius: 4px; word-break: break-all;">${dbPathDisplay}</code>
+                </p>
+                <button onclick="deleteDatabaseAndReload()" style="margin-top: 15px; padding: 10px 20px; background: #dc3545; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 14px;">
+                    🗑️ Delete Database & Reload
+                </button>
+                <p style="margin-top: 10px; font-size: 11px; color: #888;">This will delete the corrupted database and create a fresh one.</p>
             </div>
         `;
         subtitle.textContent = 'Error loading data';
@@ -1025,6 +1065,11 @@ let cachedProfiles = {}; // Cache profiles by printer name
 let currentEditProfileId = null;
 let saveProfileSource = 'printSettings'; // 'printSettings' or 'manage'
 
+function refreshPrinters() {
+    cachedPrinters = null;
+    loadPrinters();
+}
+
 async function loadPrinters() {
     const printerSelect = document.getElementById('printerSelect');
     const printerStatus = document.getElementById('printerStatus');
@@ -1099,6 +1144,12 @@ function openPrintSettingsModal(filePath, callback) {
     // Load printers if not cached
     if (!cachedPrinters) {
         loadPrinters();
+    } else {
+        // Printers already cached, but still need to load profiles for selected printer
+        const printerSelect = document.getElementById('printerSelect');
+        if (printerSelect.value) {
+            loadPrintProfiles(printerSelect.value);
+        }
     }
 }
 
@@ -1224,11 +1275,12 @@ function openSaveProfileDialog() {
     // Get current settings
     const settings = getCurrentPrintSettings();
 
-    // Display settings in dialog
-    document.getElementById('saveProfileCopies').textContent = settings.copies;
-    document.getElementById('saveProfilePaperSize').textContent = getPaperSizeLabel(settings.paper_size);
-    document.getElementById('saveProfileOrientation').textContent = capitalizeFirst(settings.orientation);
-    document.getElementById('saveProfilePaperSource').textContent = getPaperSourceLabel(settings.paper_source);
+    // Set settings in dialog inputs
+    document.getElementById('saveProfileCopies').value = settings.copies;
+    document.getElementById('saveProfilePaperSize').value = settings.paper_size;
+    document.getElementById('saveProfilePaperSource').value = settings.paper_source;
+    const orientationRadio = document.querySelector(`input[name="saveProfileOrientation"][value="${settings.orientation}"]`);
+    if (orientationRadio) orientationRadio.checked = true;
 
     // Reset form
     document.getElementById('profileNameInput').value = '';
@@ -1261,10 +1313,10 @@ function openSaveProfileDialogFromManage() {
     document.getElementById('editProfileId').value = '';
 
     // Use default settings
-    document.getElementById('saveProfileCopies').textContent = '1';
-    document.getElementById('saveProfilePaperSize').textContent = 'Letter (8.5 x 11 in)';
-    document.getElementById('saveProfileOrientation').textContent = 'Landscape';
-    document.getElementById('saveProfilePaperSource').textContent = 'Default';
+    document.getElementById('saveProfileCopies').value = 1;
+    document.getElementById('saveProfilePaperSize').value = 'letter';
+    document.getElementById('saveProfilePaperSource').value = 'default';
+    document.querySelector('input[name="saveProfileOrientation"][value="landscape"]').checked = true;
 
     // Reset form
     document.getElementById('profileNameInput').value = '';
@@ -1297,11 +1349,13 @@ function openEditProfileDialog(profileId) {
     document.getElementById('saveProfilePrinterName').value = printerName;
     document.getElementById('editProfileId').value = profileId;
 
-    // Display settings
-    document.getElementById('saveProfileCopies').textContent = profile.copies;
-    document.getElementById('saveProfilePaperSize').textContent = getPaperSizeLabel(profile.paper_size);
-    document.getElementById('saveProfileOrientation').textContent = capitalizeFirst(profile.orientation);
-    document.getElementById('saveProfilePaperSource').textContent = getPaperSourceLabel(profile.paper_source);
+    // Set settings in dialog inputs
+    document.getElementById('saveProfileCopies').value = profile.copies || 1;
+    document.getElementById('saveProfilePaperSize').value = profile.paper_size || 'letter';
+    document.getElementById('saveProfilePaperSource').value = profile.paper_source || 'default';
+    const orientationValue = profile.orientation || 'landscape';
+    const orientationRadio = document.querySelector(`input[name="saveProfileOrientation"][value="${orientationValue}"]`);
+    if (orientationRadio) orientationRadio.checked = true;
 
     // Fill form
     document.getElementById('profileNameInput').value = profile.name;
@@ -1341,28 +1395,13 @@ async function saveProfile() {
         return;
     }
 
-    // Get settings - if editing from manage with existing profile, use those settings
-    let settings;
-    if (currentEditProfileId) {
-        const profiles = cachedProfiles[printerName] || [];
-        const existingProfile = profiles.find(p => p.id == currentEditProfileId);
-        settings = existingProfile ? {
-            copies: existingProfile.copies,
-            paper_size: existingProfile.paper_size,
-            orientation: existingProfile.orientation,
-            paper_source: existingProfile.paper_source
-        } : getCurrentPrintSettings();
-    } else if (saveProfileSource === 'printSettings') {
-        settings = getCurrentPrintSettings();
-    } else {
-        // New profile from manage - use defaults
-        settings = {
-            copies: 1,
-            paper_size: 'letter',
-            orientation: 'landscape',
-            paper_source: 'default'
-        };
-    }
+    // Get settings from dialog inputs
+    const settings = {
+        copies: parseInt(document.getElementById('saveProfileCopies').value) || 1,
+        paper_size: document.getElementById('saveProfilePaperSize').value || 'letter',
+        orientation: document.querySelector('input[name="saveProfileOrientation"]:checked')?.value || 'landscape',
+        paper_source: document.getElementById('saveProfilePaperSource').value || 'default'
+    };
 
     // Get calibration values from inputs
     const calibration = getCalibrationValues();
@@ -1786,6 +1825,51 @@ async function confirmPrint() {
 
         if (printResult.success) {
             showToast('Sent to printer!', 'success');
+
+            // Auto-save profile if settings differ from the selected profile
+            if (profileId) {
+                const profiles = cachedProfiles[printerName] || [];
+                const profile = profiles.find(p => p.id == profileId);
+                if (profile) {
+                    const settingsChanged =
+                        profile.copies !== copies ||
+                        profile.paper_size !== paperSize ||
+                        profile.orientation !== orientation ||
+                        profile.paper_source !== paperSource;
+
+                    if (settingsChanged) {
+                        console.log('[App] Profile settings changed, auto-saving...');
+                        try {
+                            const updateResult = await ipcRenderer.invoke('save-print-profile', {
+                                id: parseInt(profileId),
+                                name: profile.name,
+                                printer_name: printerName,
+                                copies: copies,
+                                paper_size: paperSize,
+                                orientation: orientation,
+                                paper_source: paperSource,
+                                is_default: profile.is_default,
+                                calibration_ab: profile.calibration_ab,
+                                calibration_bc: profile.calibration_bc,
+                                calibration_cd: profile.calibration_cd,
+                                calibration_da: profile.calibration_da,
+                                border_top: profile.border_top,
+                                border_right: profile.border_right,
+                                border_bottom: profile.border_bottom,
+                                border_left: profile.border_left
+                            });
+                            if (updateResult.success) {
+                                console.log('[App] Profile auto-saved successfully');
+                                // Refresh cached profiles
+                                delete cachedProfiles[printerName];
+                            }
+                        } catch (err) {
+                            console.error('[App] Error auto-saving profile:', err);
+                        }
+                    }
+                }
+            }
+
             closePrintSettingsModal();
 
             // Call callback if provided
@@ -2343,10 +2427,11 @@ async function printCalibrationPage() {
 
 // Clear calibration values
 function clearCalibration() {
-    document.getElementById('calibrationAB').value = '';
-    document.getElementById('calibrationBC').value = '';
-    document.getElementById('calibrationCD').value = '';
-    document.getElementById('calibrationDA').value = '';
+    // Default the 100mm square calibration test values to 100
+    document.getElementById('calibrationAB').value = '100';
+    document.getElementById('calibrationBC').value = '100';
+    document.getElementById('calibrationCD').value = '100';
+    document.getElementById('calibrationDA').value = '100';
     document.getElementById('borderTop').value = '';
     document.getElementById('borderRight').value = '';
     document.getElementById('borderBottom').value = '';

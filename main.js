@@ -301,6 +301,33 @@ ipcMain.handle('print-calibration-page', async (event, options = {}) => {
     return { success: false, error: 'Calibration only supported on Windows' };
 });
 
+// IPC handler for deleting database and reloading app
+ipcMain.handle('delete-database-and-reload', async () => {
+    try {
+        const dbPath = db.getDbPath();
+        console.log('[Main] Deleting database at:', dbPath);
+
+        // Close the database connection
+        db.close();
+
+        // Delete the database file
+        if (dbPath && fs.existsSync(dbPath)) {
+            fs.unlinkSync(dbPath);
+            console.log('[Main] Database deleted successfully');
+        }
+
+        // Reload the app
+        if (mainWindow) {
+            mainWindow.reload();
+        }
+
+        return { success: true };
+    } catch (err) {
+        console.error('[Main] Error deleting database:', err);
+        return { success: false, error: err.message };
+    }
+});
+
 // IPC handler for getting calibration expected distance and border inset
 ipcMain.handle('get-calibration-info', async () => {
     if (process.platform === 'win32' && printWindows) {
