@@ -7,6 +7,8 @@
 const path = require('path');
 const fs = require('fs');
 const { getDataDir } = require('./paths.js');
+const { runMigrations, getMigrationStatus, getAppliedMigrations } = require('./db/migrate.js');
+const { seedDefaults } = require('./db/seeds.js');
 
 // Load sql.js
 let initSqlJs = null;
@@ -111,10 +113,19 @@ async function initializeAsync() {
         db = new SQL.Database();
     }
 
-    // Ensure schema exists
-    ensureSchema();
+    // Handle existing databases (pre-migration system)
+    markExistingDatabaseAsMigrated(db);
 
-    // Save after schema changes
+    // Run migrations
+    const appliedMigrations = runMigrations(db, saveDatabase);
+    if (appliedMigrations.length > 0) {
+        console.log(`[DB] Applied ${appliedMigrations.length} migration(s)`);
+    }
+
+    // Seed default data if needed
+    seedDefaults(db, saveDatabase);
+
+    // Save after schema/seed changes
     saveDatabase();
 
     return { dbDir: DB_DIR, dbPath: DB_PATH };
@@ -140,155 +151,40 @@ function initialize() {
 }
 
 /**
- * Ensure database schema exists
+ * Mark an existing database as having all migrations applied
+ * This is used for databases created before the migration system
+ * @param {Object} db - sql.js database instance
  */
-function ensureSchema() {
-    // Check if rescues table exists
-    const rescuesResult = db.exec(
-        "SELECT name FROM sqlite_master WHERE type='table' AND name='rescues'"
+function markExistingDatabaseAsMigrated(db) {
+    const { ensureMigrationsTable, getAvailableMigrations, getAppliedMigrations } = require('./db/migrate.js');
+
+    ensureMigrationsTable(db);
+
+    // Check if tables already exist (pre-migration database)
+    const tablesResult = db.exec(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name IN ('rescues', 'animals', 'print_profiles')"
     );
 
-    if (rescuesResult.length === 0) {
-        db.run(`
-            CREATE TABLE IF NOT EXISTS rescues (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                name TEXT NOT NULL,
-                website TEXT NOT NULL,
-                logo_path TEXT NOT NULL,
-                org_id TEXT,
-                scraper_type TEXT NOT NULL,
-                created_at TEXT DEFAULT (datetime('now'))
-            )
-        `);
+    if (tablesResult.length > 0 && tablesResult[0].values.length >= 2) {
+        // Database has existing tables, check if migrations are tracked
+        const applied = getAppliedMigrations(db);
 
-        db.run(`
-            INSERT OR IGNORE INTO rescues (id, name, website, logo_path, org_id, scraper_type) VALUES
-                (1, 'Paws Rescue League', 'pawsrescueleague.org', 'logo.png', '1841035', 'wagtopia'),
-                (2, 'Brass City Rescue', 'brasscityrescuealliance.org', 'brass-city-logo.jpg', '87063', 'adoptapet')
-        `);
-    }
+        if (applied.length === 0) {
+            // Mark initial migration as applied since schema already exists
+            const available = getAvailableMigrations();
+            const initialMigration = available.find(m => m.name.includes('initial'));
 
-    const tableResult = db.exec(
-        "SELECT name FROM sqlite_master WHERE type='table' AND name='animals'"
-    );
-
-    if (tableResult.length === 0) {
-        db.run(`
-            CREATE TABLE IF NOT EXISTS animals (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                name TEXT NOT NULL,
-                slug TEXT NOT NULL,
-                size TEXT NOT NULL,
-                shots INTEGER NOT NULL DEFAULT 0,
-                housetrained INTEGER NOT NULL DEFAULT 0,
-                breed TEXT NOT NULL,
-                age_long TEXT NOT NULL,
-                age_short TEXT NOT NULL,
-                gender TEXT NOT NULL,
-                kids TEXT NOT NULL DEFAULT '?',
-                dogs TEXT NOT NULL DEFAULT '?',
-                cats TEXT NOT NULL DEFAULT '?',
-                portrait_path TEXT,
-                portrait_data BLOB,
-                portrait_mime TEXT,
-                rescue_id INTEGER DEFAULT 1,
-                created_at TEXT DEFAULT (datetime('now')),
-                updated_at TEXT DEFAULT (datetime('now')),
-                FOREIGN KEY (rescue_id) REFERENCES rescues(id)
-            )
-        `);
-
-        db.run(`CREATE INDEX IF NOT EXISTS idx_animals_name ON animals(name)`);
-        db.run(`CREATE INDEX IF NOT EXISTS idx_animals_rescue ON animals(rescue_id)`);
-
-        db.run(`
-            CREATE TRIGGER IF NOT EXISTS update_animals_timestamp
-            AFTER UPDATE ON animals
-            BEGIN
-                UPDATE animals SET updated_at = datetime('now') WHERE id = NEW.id;
-            END
-        `);
-        return true; // Schema was created
-    }
-
-    // Check if rescue_id column exists, add it if not (migration for existing databases)
-    const columnsResult = db.exec("PRAGMA table_info(animals)");
-    if (columnsResult.length > 0) {
-        const columns = columnsResult[0].values;
-        const hasRescueId = columns.some(col => col[1] === 'rescue_id');
-        if (!hasRescueId) {
-            db.run(`ALTER TABLE animals ADD COLUMN rescue_id INTEGER DEFAULT 1`);
-            console.log('[DB] Added rescue_id column to existing animals table');
+            if (initialMigration) {
+                console.log('[DB] Marking existing database as migrated');
+                const stmt = db.prepare(
+                    'INSERT INTO schema_migrations (version, name) VALUES (?, ?)'
+                );
+                stmt.bind([initialMigration.version, initialMigration.name]);
+                stmt.step();
+                stmt.free();
+            }
         }
     }
-
-    // Create print_profiles table if it doesn't exist
-    const printProfilesResult = db.exec(
-        "SELECT name FROM sqlite_master WHERE type='table' AND name='print_profiles'"
-    );
-
-    if (printProfilesResult.length === 0) {
-        db.run(`
-            CREATE TABLE IF NOT EXISTS print_profiles (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                name TEXT NOT NULL,
-                printer_name TEXT NOT NULL,
-                copies INTEGER NOT NULL DEFAULT 1,
-                paper_size TEXT NOT NULL DEFAULT 'letter',
-                orientation TEXT NOT NULL DEFAULT 'landscape',
-                paper_source TEXT NOT NULL DEFAULT 'default',
-                is_default INTEGER NOT NULL DEFAULT 0,
-                calibration_ab REAL,
-                calibration_bc REAL,
-                calibration_cd REAL,
-                calibration_da REAL,
-                border_top REAL,
-                border_right REAL,
-                border_bottom REAL,
-                border_left REAL,
-                created_at TEXT DEFAULT (datetime('now')),
-                updated_at TEXT DEFAULT (datetime('now'))
-            )
-        `);
-
-        db.run(`CREATE INDEX IF NOT EXISTS idx_print_profiles_printer ON print_profiles(printer_name)`);
-
-        db.run(`
-            CREATE TRIGGER IF NOT EXISTS update_print_profiles_timestamp
-            AFTER UPDATE ON print_profiles
-            BEGIN
-                UPDATE print_profiles SET updated_at = datetime('now') WHERE id = NEW.id;
-            END
-        `);
-
-        console.log('[DB] Created print_profiles table');
-    }
-
-    // Migration: Add calibration columns if they don't exist
-    const printProfileColumns = db.exec("PRAGMA table_info(print_profiles)");
-    if (printProfileColumns.length > 0) {
-        const columns = printProfileColumns[0].values;
-        const hasCalibrationAb = columns.some(col => col[1] === 'calibration_ab');
-        if (!hasCalibrationAb) {
-            db.run(`ALTER TABLE print_profiles ADD COLUMN calibration_ab REAL`);
-            db.run(`ALTER TABLE print_profiles ADD COLUMN calibration_bc REAL`);
-            db.run(`ALTER TABLE print_profiles ADD COLUMN calibration_cd REAL`);
-            db.run(`ALTER TABLE print_profiles ADD COLUMN calibration_da REAL`);
-            console.log('[DB] Added calibration columns to print_profiles table');
-        }
-
-        // Migration: Add border calibration columns if they don't exist
-        const hasBorderTop = columns.some(col => col[1] === 'border_top');
-        if (!hasBorderTop) {
-            db.run(`ALTER TABLE print_profiles ADD COLUMN border_top REAL`);
-            db.run(`ALTER TABLE print_profiles ADD COLUMN border_right REAL`);
-            db.run(`ALTER TABLE print_profiles ADD COLUMN border_bottom REAL`);
-            db.run(`ALTER TABLE print_profiles ADD COLUMN border_left REAL`);
-            console.log('[DB] Added border calibration columns to print_profiles table');
-        }
-    }
-
-    return false; // Schema already existed
 }
 
 /**
@@ -867,6 +763,10 @@ function setDefaultPrintProfile(id) {
     );
 }
 
+// Re-export migration and seed functions for external use
+const migrate = require('./db/migrate.js');
+const seeds = require('./db/seeds.js');
+
 // Export all functions
 module.exports = {
     // Connection management
@@ -904,5 +804,21 @@ module.exports = {
     createPrintProfile,
     updatePrintProfile,
     deletePrintProfile,
-    setDefaultPrintProfile
+    setDefaultPrintProfile,
+
+    // Migration utilities
+    migrations: {
+        run: () => runMigrations(db, saveDatabase),
+        rollback: (count = 1) => migrate.rollbackMigrations(db, saveDatabase, count),
+        rollbackAll: () => migrate.rollbackAll(db, saveDatabase),
+        status: () => getMigrationStatus(db),
+        create: migrate.createMigration
+    },
+
+    // Seed utilities
+    seeds: {
+        run: () => seeds.seedDefaults(db, saveDatabase),
+        reseed: () => seeds.reseed(db, saveDatabase),
+        create: seeds.createSeed
+    }
 };
