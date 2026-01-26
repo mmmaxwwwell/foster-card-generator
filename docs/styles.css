@@ -92,9 +92,10 @@ body {
 }
 
 .hero-logo {
-    width: 200px;
-    margin-bottom: 24px;
-    filter: drop-shadow(0 4px 20px rgba(0, 0, 0, 0.2));
+    width: 400px;
+    max-width: 90%;
+    margin-bottom: 32px;
+    filter: drop-shadow(0 8px 30px rgba(0, 0, 0, 0.3));
 }
 
 .hero h1 {
@@ -616,7 +617,7 @@ body {
     }
 
     .hero-logo {
-        width: 150px;
+        width: 280px;
     }
 
     .features h2,

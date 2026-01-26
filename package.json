@@ -15,7 +15,7 @@
     "test:scraper": "node test-scraper-integration.js",
     "test:scraper:local": "USE_LOCAL_FILE=true node test-scraper-integration.js"
   },
-  "license": "ISC",
+  "license": "MIT",
   "description": "",
   "dependencies": {
     "axios": "^1.6.0",

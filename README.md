@@ -281,4 +281,4 @@ For bug reports and feature requests, please visit the [Issues](../../issues) pa
 
 ## License
 
-ISC License
+MIT License
