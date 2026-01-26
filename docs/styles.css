@@ -168,6 +168,63 @@ body {
     font-size: 1.125rem;
 }
 
+.btn-template {
+    background: #ff9900;
+    color: var(--white);
+    white-space: nowrap;
+}
+
+.btn-template:hover {
+    background: #e68a00;
+    transform: translateY(-2px);
+    box-shadow: 0 8px 25px rgba(255, 153, 0, 0.3);
+}
+
+/* Template Callout Section */
+.template-callout {
+    background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+    padding: 40px 24px;
+}
+
+.template-content {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 32px;
+    max-width: 1000px;
+    margin: 0 auto;
+    flex-wrap: wrap;
+}
+
+.template-icon {
+    width: 80px;
+    height: 80px;
+    background: linear-gradient(135deg, var(--gradient-start) 0%, var(--gradient-end) 100%);
+    border-radius: 16px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--white);
+    flex-shrink: 0;
+}
+
+.template-text {
+    flex: 1;
+    min-width: 300px;
+}
+
+.template-text h3 {
+    color: var(--white);
+    font-size: 1.5rem;
+    margin-bottom: 8px;
+}
+
+.template-text p {
+    color: rgba(255, 255, 255, 0.8);
+    font-size: 1rem;
+    line-height: 1.6;
+}
+
 /* Features Section */
 .features {
     padding: 100px 24px;
@@ -604,5 +661,19 @@ body {
 
     .screenshots {
         padding: 60px 20px;
+    }
+
+    .template-content {
+        flex-direction: column;
+        text-align: center;
+        gap: 20px;
+    }
+
+    .template-text {
+        min-width: auto;
+    }
+
+    .template-text h3 {
+        font-size: 1.25rem;
     }
 }
