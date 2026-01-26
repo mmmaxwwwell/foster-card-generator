@@ -121,6 +121,21 @@ body {
     margin-right: auto;
 }
 
+.hero-features {
+    list-style: none;
+    font-size: 1.125rem;
+    opacity: 0.9;
+    max-width: 600px;
+    margin-left: auto;
+    margin-right: auto;
+    padding-bottom: 40px;
+    text-align: left;
+}
+
+.hero-features li {
+    padding: 8px 0;
+}
+
 .hero-buttons {
     display: flex;
     gap: 16px;
