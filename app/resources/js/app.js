@@ -260,7 +260,8 @@ function renderAnimalCard(animal) {
                     </div>
                 </div>
                 <div class="card-actions">
-                    <button class="btn-generate-cards" onclick="event.stopPropagation(); generateCards(${animal.id})">Generate Cards</button>
+                    <button class="btn-print-front" onclick="event.stopPropagation(); printCardFront(${animal.id})">Print Front</button>
+                    <button class="btn-print-back" onclick="event.stopPropagation(); printCardBack(${animal.id})">Print Back</button>
                 </div>
             </div>
         </div>
@@ -1010,8 +1011,798 @@ document.addEventListener('keydown', (e) => {
         closeSelectFromSiteModal();
         closeDeleteMultipleModal();
         closePrintMultipleModal();
+        closePrintSettingsModal();
+        closeManageProfilesModal();
+        closeSaveProfileDialog();
     }
 });
+
+// Print Settings Modal functions
+let cachedPrinters = null;
+let currentPrintFilePath = null;
+let currentPrintCallback = null;
+let cachedProfiles = {}; // Cache profiles by printer name
+let currentEditProfileId = null;
+let saveProfileSource = 'printSettings'; // 'printSettings' or 'manage'
+
+async function loadPrinters() {
+    const printerSelect = document.getElementById('printerSelect');
+    const printerStatus = document.getElementById('printerStatus');
+
+    printerStatus.className = 'printer-status loading';
+    printerStatus.textContent = 'Loading printers...';
+
+    try {
+        const result = await ipcRenderer.invoke('get-printers');
+
+        if (!result.success) {
+            throw new Error(result.error || 'Failed to get printers');
+        }
+
+        cachedPrinters = result.printers;
+        console.log('[App] Loaded printers:', cachedPrinters);
+
+        // Clear and populate printer select
+        printerSelect.innerHTML = '';
+
+        if (cachedPrinters.length === 0) {
+            printerSelect.innerHTML = '<option value="">No printers found</option>';
+            printerStatus.className = 'printer-status error';
+            printerStatus.textContent = 'No printers found. Please install a printer.';
+            return;
+        }
+
+        // Find default printer and add all printers to select
+        let defaultPrinterName = null;
+        cachedPrinters.forEach(printer => {
+            const option = document.createElement('option');
+            option.value = printer.name;
+            option.textContent = printer.name + (printer.isDefault ? ' (Default)' : '');
+            if (printer.isDefault) {
+                option.selected = true;
+                defaultPrinterName = printer.name;
+            }
+            printerSelect.appendChild(option);
+        });
+
+        printerStatus.className = 'printer-status';
+        printerStatus.style.display = 'none';
+
+        // Load profiles for the default/selected printer
+        if (printerSelect.value) {
+            await loadPrintProfiles(printerSelect.value);
+        }
+
+    } catch (err) {
+        console.error('[App] Error loading printers:', err);
+        printerSelect.innerHTML = '<option value="">Error loading printers</option>';
+        printerStatus.className = 'printer-status error';
+        printerStatus.textContent = 'Error: ' + err.message;
+    }
+}
+
+function openPrintSettingsModal(filePath, callback) {
+    currentPrintFilePath = filePath;
+    currentPrintCallback = callback;
+
+    document.getElementById('printSettingsModal').classList.add('active');
+
+    // Set preview image
+    const previewImage = document.getElementById('printPreviewImage');
+    previewImage.src = 'file:///' + filePath.replace(/\\/g, '/');
+
+    // Reset form values
+    document.getElementById('copiesInput').value = 1;
+    document.getElementById('paperSizeSelect').value = 'letter';
+    document.querySelector('input[name="orientation"][value="landscape"]').checked = true;
+
+    // Load printers if not cached
+    if (!cachedPrinters) {
+        loadPrinters();
+    }
+}
+
+function closePrintSettingsModal() {
+    document.getElementById('printSettingsModal').classList.remove('active');
+    currentPrintFilePath = null;
+    currentPrintCallback = null;
+}
+
+// Print Profile functions
+async function loadPrintProfiles(printerName) {
+    const profileSelect = document.getElementById('printProfileSelect');
+
+    try {
+        const result = await ipcRenderer.invoke('get-print-profiles', printerName);
+
+        if (!result.success) {
+            console.error('[App] Error loading profiles:', result.error);
+            return;
+        }
+
+        cachedProfiles[printerName] = result.profiles;
+        console.log('[App] Loaded profiles for', printerName, ':', result.profiles);
+
+        // Clear and populate profile select
+        profileSelect.innerHTML = '<option value="">No profile selected</option>';
+
+        result.profiles.forEach(profile => {
+            const option = document.createElement('option');
+            option.value = profile.id;
+            const isCalibrated = profile.calibration_ab && profile.calibration_bc &&
+                                 profile.calibration_cd && profile.calibration_da;
+            let label = profile.name;
+            if (profile.is_default) label += ' (Default)';
+            if (isCalibrated) label += ' [Cal]';
+            option.textContent = label;
+            if (profile.is_default) {
+                option.selected = true;
+            }
+            profileSelect.appendChild(option);
+        });
+
+        // If there's a default profile, apply its settings
+        const defaultProfile = result.profiles.find(p => p.is_default);
+        if (defaultProfile) {
+            applyPrintProfile(defaultProfile);
+        }
+
+    } catch (err) {
+        console.error('[App] Error loading profiles:', err);
+    }
+}
+
+function applyPrintProfile(profile) {
+    if (!profile) return;
+
+    document.getElementById('copiesInput').value = profile.copies || 1;
+    document.getElementById('paperSizeSelect').value = profile.paper_size || 'letter';
+    document.getElementById('paperSourceSelect').value = profile.paper_source || 'default';
+
+    const orientationValue = profile.orientation || 'landscape';
+    const orientationRadio = document.querySelector(`input[name="orientation"][value="${orientationValue}"]`);
+    if (orientationRadio) {
+        orientationRadio.checked = true;
+    }
+
+    console.log('[App] Applied profile:', profile.name);
+}
+
+async function onPrinterChange() {
+    const printerSelect = document.getElementById('printerSelect');
+    const printerName = printerSelect.value;
+
+    if (printerName) {
+        await loadPrintProfiles(printerName);
+    } else {
+        // Clear profile select
+        const profileSelect = document.getElementById('printProfileSelect');
+        profileSelect.innerHTML = '<option value="">No profile selected</option>';
+    }
+}
+
+function onProfileChange() {
+    const profileSelect = document.getElementById('printProfileSelect');
+    const printerSelect = document.getElementById('printerSelect');
+    const profileId = profileSelect.value;
+
+    if (!profileId || !printerSelect.value) return;
+
+    const profiles = cachedProfiles[printerSelect.value] || [];
+    const profile = profiles.find(p => p.id == profileId);
+
+    if (profile) {
+        applyPrintProfile(profile);
+    }
+}
+
+function getCurrentPrintSettings() {
+    return {
+        copies: parseInt(document.getElementById('copiesInput').value) || 1,
+        paper_size: document.getElementById('paperSizeSelect').value || 'letter',
+        orientation: document.querySelector('input[name="orientation"]:checked')?.value || 'landscape',
+        paper_source: document.getElementById('paperSourceSelect').value || 'default'
+    };
+}
+
+function openSaveProfileDialog() {
+    saveProfileSource = 'printSettings';
+    currentEditProfileId = null;
+
+    const printerSelect = document.getElementById('printerSelect');
+    const printerName = printerSelect.value;
+
+    if (!printerName) {
+        showToast('Please select a printer first', 'error');
+        return;
+    }
+
+    // Store printer name
+    document.getElementById('saveProfilePrinterName').value = printerName;
+    document.getElementById('editProfileId').value = '';
+
+    // Get current settings
+    const settings = getCurrentPrintSettings();
+
+    // Display settings in dialog
+    document.getElementById('saveProfileCopies').textContent = settings.copies;
+    document.getElementById('saveProfilePaperSize').textContent = getPaperSizeLabel(settings.paper_size);
+    document.getElementById('saveProfileOrientation').textContent = capitalizeFirst(settings.orientation);
+    document.getElementById('saveProfilePaperSource').textContent = getPaperSourceLabel(settings.paper_source);
+
+    // Reset form
+    document.getElementById('profileNameInput').value = '';
+    document.getElementById('setAsDefaultCheckbox').checked = false;
+    document.getElementById('saveProfileTitle').textContent = 'Save Print Profile';
+
+    // Clear calibration inputs for new profile
+    clearCalibration();
+
+    document.getElementById('saveProfileModal').classList.add('active');
+}
+
+function openSaveProfileDialogFromManage() {
+    saveProfileSource = 'manage';
+    currentEditProfileId = null;
+
+    const printerSelect = document.getElementById('manageProfilesPrinterSelect');
+    const printerName = printerSelect.value;
+
+    if (!printerName) {
+        showToast('Please select a printer first', 'error');
+        return;
+    }
+
+    // Close manage profiles modal first to prevent z-index/focus issues
+    document.getElementById('manageProfilesModal').classList.remove('active');
+
+    // Store printer name
+    document.getElementById('saveProfilePrinterName').value = printerName;
+    document.getElementById('editProfileId').value = '';
+
+    // Use default settings
+    document.getElementById('saveProfileCopies').textContent = '1';
+    document.getElementById('saveProfilePaperSize').textContent = 'Letter (8.5 x 11 in)';
+    document.getElementById('saveProfileOrientation').textContent = 'Landscape';
+    document.getElementById('saveProfilePaperSource').textContent = 'Default';
+
+    // Reset form
+    document.getElementById('profileNameInput').value = '';
+    document.getElementById('setAsDefaultCheckbox').checked = false;
+    document.getElementById('saveProfileTitle').textContent = 'New Print Profile';
+
+    // Clear calibration inputs for new profile
+    clearCalibration();
+
+    document.getElementById('saveProfileModal').classList.add('active');
+}
+
+function openEditProfileDialog(profileId) {
+    const printerSelect = document.getElementById('manageProfilesPrinterSelect');
+    const printerName = printerSelect.value;
+    const profiles = cachedProfiles[printerName] || [];
+    const profile = profiles.find(p => p.id == profileId);
+
+    if (!profile) {
+        showToast('Profile not found', 'error');
+        return;
+    }
+
+    // Close manage profiles modal first to prevent z-index/focus issues
+    document.getElementById('manageProfilesModal').classList.remove('active');
+
+    saveProfileSource = 'manage';
+    currentEditProfileId = profileId;
+
+    document.getElementById('saveProfilePrinterName').value = printerName;
+    document.getElementById('editProfileId').value = profileId;
+
+    // Display settings
+    document.getElementById('saveProfileCopies').textContent = profile.copies;
+    document.getElementById('saveProfilePaperSize').textContent = getPaperSizeLabel(profile.paper_size);
+    document.getElementById('saveProfileOrientation').textContent = capitalizeFirst(profile.orientation);
+    document.getElementById('saveProfilePaperSource').textContent = getPaperSourceLabel(profile.paper_source);
+
+    // Fill form
+    document.getElementById('profileNameInput').value = profile.name;
+    document.getElementById('setAsDefaultCheckbox').checked = profile.is_default == 1;
+    document.getElementById('saveProfileTitle').textContent = 'Edit Print Profile';
+
+    // Set calibration values if present
+    setCalibrationValues(profile);
+
+    document.getElementById('saveProfileModal').classList.add('active');
+}
+
+function closeSaveProfileDialog() {
+    document.getElementById('saveProfileModal').classList.remove('active');
+
+    // Reopen manage profiles modal if we came from there
+    if (saveProfileSource === 'manage') {
+        document.getElementById('manageProfilesModal').classList.add('active');
+    }
+
+    currentEditProfileId = null;
+}
+
+async function saveProfile() {
+    const profileName = document.getElementById('profileNameInput').value.trim();
+    const printerName = document.getElementById('saveProfilePrinterName').value;
+    const isDefault = document.getElementById('setAsDefaultCheckbox').checked;
+    const editId = document.getElementById('editProfileId').value;
+
+    if (!profileName) {
+        showToast('Please enter a profile name', 'error');
+        return;
+    }
+
+    if (!printerName) {
+        showToast('No printer selected', 'error');
+        return;
+    }
+
+    // Get settings - if editing from manage with existing profile, use those settings
+    let settings;
+    if (currentEditProfileId) {
+        const profiles = cachedProfiles[printerName] || [];
+        const existingProfile = profiles.find(p => p.id == currentEditProfileId);
+        settings = existingProfile ? {
+            copies: existingProfile.copies,
+            paper_size: existingProfile.paper_size,
+            orientation: existingProfile.orientation,
+            paper_source: existingProfile.paper_source
+        } : getCurrentPrintSettings();
+    } else if (saveProfileSource === 'printSettings') {
+        settings = getCurrentPrintSettings();
+    } else {
+        // New profile from manage - use defaults
+        settings = {
+            copies: 1,
+            paper_size: 'letter',
+            orientation: 'landscape',
+            paper_source: 'default'
+        };
+    }
+
+    // Get calibration values from inputs
+    const calibration = getCalibrationValues();
+
+    const profileData = {
+        id: editId ? parseInt(editId) : null,
+        name: profileName,
+        printer_name: printerName,
+        copies: settings.copies,
+        paper_size: settings.paper_size,
+        orientation: settings.orientation,
+        paper_source: settings.paper_source,
+        is_default: isDefault,
+        calibration_ab: calibration ? calibration.ab : null,
+        calibration_bc: calibration ? calibration.bc : null,
+        calibration_cd: calibration ? calibration.cd : null,
+        calibration_da: calibration ? calibration.da : null,
+        border_top: calibration ? calibration.borderTop : null,
+        border_right: calibration ? calibration.borderRight : null,
+        border_bottom: calibration ? calibration.borderBottom : null,
+        border_left: calibration ? calibration.borderLeft : null
+    };
+
+    try {
+        const result = await ipcRenderer.invoke('save-print-profile', profileData);
+
+        if (result.success) {
+            showToast(editId ? 'Profile updated!' : 'Profile saved!', 'success');
+            closeSaveProfileDialog();
+
+            // Refresh profiles
+            delete cachedProfiles[printerName];
+
+            if (saveProfileSource === 'printSettings') {
+                await loadPrintProfiles(printerName);
+            } else {
+                await loadProfilesForManagement();
+            }
+        } else {
+            showToast('Error saving profile: ' + result.error, 'error');
+        }
+    } catch (err) {
+        console.error('[App] Error saving profile:', err);
+        showToast('Error saving profile: ' + err.message, 'error');
+    }
+}
+
+// Manage Profiles Modal functions
+function openManageProfilesModal() {
+    document.getElementById('manageProfilesModal').classList.add('active');
+
+    // Populate printer select
+    const printerSelect = document.getElementById('manageProfilesPrinterSelect');
+    printerSelect.innerHTML = '<option value="">Select a printer...</option>';
+
+    if (cachedPrinters && cachedPrinters.length > 0) {
+        cachedPrinters.forEach(printer => {
+            const option = document.createElement('option');
+            option.value = printer.name;
+            option.textContent = printer.name + (printer.isDefault ? ' (Default)' : '');
+            printerSelect.appendChild(option);
+        });
+
+        // Select the printer from print settings if available
+        const printSettingsPrinter = document.getElementById('printerSelect').value;
+        if (printSettingsPrinter) {
+            printerSelect.value = printSettingsPrinter;
+            loadProfilesForManagement();
+        }
+    }
+}
+
+// Open Manage Profiles from main page (loads printers if needed)
+async function openManageProfilesFromMain() {
+    document.getElementById('manageProfilesModal').classList.add('active');
+
+    const printerSelect = document.getElementById('manageProfilesPrinterSelect');
+    printerSelect.innerHTML = '<option value="">Loading printers...</option>';
+
+    // Load printers if not cached
+    if (!cachedPrinters) {
+        try {
+            const result = await ipcRenderer.invoke('get-printers');
+            if (result.success) {
+                cachedPrinters = result.printers;
+            } else {
+                printerSelect.innerHTML = '<option value="">Error loading printers</option>';
+                return;
+            }
+        } catch (err) {
+            console.error('[App] Error loading printers:', err);
+            printerSelect.innerHTML = '<option value="">Error loading printers</option>';
+            return;
+        }
+    }
+
+    // Populate printer select
+    printerSelect.innerHTML = '<option value="">Select a printer...</option>';
+
+    if (cachedPrinters && cachedPrinters.length > 0) {
+        let defaultPrinter = null;
+        cachedPrinters.forEach(printer => {
+            const option = document.createElement('option');
+            option.value = printer.name;
+            option.textContent = printer.name + (printer.isDefault ? ' (Default)' : '');
+            if (printer.isDefault) {
+                defaultPrinter = printer.name;
+            }
+            printerSelect.appendChild(option);
+        });
+
+        // Auto-select the default printer and load its profiles
+        if (defaultPrinter) {
+            printerSelect.value = defaultPrinter;
+            loadProfilesForManagement();
+        }
+    } else {
+        printerSelect.innerHTML = '<option value="">No printers found</option>';
+    }
+}
+
+function closeManageProfilesModal() {
+    document.getElementById('manageProfilesModal').classList.remove('active');
+}
+
+async function loadProfilesForManagement() {
+    const printerSelect = document.getElementById('manageProfilesPrinterSelect');
+    const profileList = document.getElementById('profileList');
+    const addNewProfileBtn = document.getElementById('addNewProfileBtn');
+    const printerName = printerSelect.value;
+
+    if (!printerName) {
+        profileList.innerHTML = '<div class="profile-empty">Select a printer to view profiles</div>';
+        addNewProfileBtn.style.display = 'none';
+        return;
+    }
+
+    addNewProfileBtn.style.display = 'block';
+
+    try {
+        const result = await ipcRenderer.invoke('get-print-profiles', printerName);
+
+        if (!result.success) {
+            profileList.innerHTML = '<div class="profile-empty">Error loading profiles</div>';
+            return;
+        }
+
+        cachedProfiles[printerName] = result.profiles;
+
+        if (result.profiles.length === 0) {
+            profileList.innerHTML = '<div class="profile-empty">No profiles for this printer</div>';
+            return;
+        }
+
+        profileList.innerHTML = result.profiles.map(profile => {
+            const isCalibrated = profile.calibration_ab && profile.calibration_bc &&
+                                 profile.calibration_cd && profile.calibration_da;
+            return `
+            <div class="profile-item">
+                <div class="profile-item-info">
+                    <div class="profile-item-name">
+                        ${escapeHtml(profile.name)}
+                        ${profile.is_default ? '<span class="default-badge">Default</span>' : ''}
+                        ${isCalibrated ? '<span class="default-badge" style="background: #28a745;">Calibrated</span>' : ''}
+                    </div>
+                    <div class="profile-item-settings">
+                        ${getPaperSizeLabel(profile.paper_size)}, ${capitalizeFirst(profile.orientation)}, ${profile.copies} ${profile.copies === 1 ? 'copy' : 'copies'}
+                    </div>
+                </div>
+                <div class="profile-item-actions">
+                    ${!profile.is_default ? `<button class="btn btn-secondary" onclick="setProfileAsDefault(${profile.id})">Set Default</button>` : ''}
+                    <button class="btn btn-secondary" onclick="copyProfile(${profile.id})">Copy</button>
+                    <button class="btn btn-secondary" onclick="openEditProfileDialog(${profile.id})">Edit</button>
+                    <button class="btn btn-danger-outline" onclick="deleteProfile(${profile.id})">Delete</button>
+                </div>
+            </div>
+        `}).join('');
+
+    } catch (err) {
+        console.error('[App] Error loading profiles for management:', err);
+        profileList.innerHTML = '<div class="profile-empty">Error loading profiles</div>';
+    }
+}
+
+async function setProfileAsDefault(profileId) {
+    try {
+        const result = await ipcRenderer.invoke('set-default-print-profile', profileId);
+
+        if (result.success) {
+            showToast('Default profile updated!', 'success');
+
+            // Refresh the management list
+            const printerName = document.getElementById('manageProfilesPrinterSelect').value;
+            delete cachedProfiles[printerName];
+            await loadProfilesForManagement();
+
+            // Also refresh the print settings dropdown if same printer
+            const printSettingsPrinter = document.getElementById('printerSelect').value;
+            if (printSettingsPrinter === printerName) {
+                await loadPrintProfiles(printerName);
+            }
+        } else {
+            showToast('Error setting default: ' + result.error, 'error');
+        }
+    } catch (err) {
+        console.error('[App] Error setting default profile:', err);
+        showToast('Error setting default: ' + err.message, 'error');
+    }
+}
+
+async function deleteProfile(profileId) {
+    if (!confirm('Are you sure you want to delete this profile?')) {
+        return;
+    }
+
+    try {
+        const result = await ipcRenderer.invoke('delete-print-profile', profileId);
+
+        if (result.success) {
+            showToast('Profile deleted!', 'success');
+
+            // Refresh the management list
+            const printerName = document.getElementById('manageProfilesPrinterSelect').value;
+            delete cachedProfiles[printerName];
+            await loadProfilesForManagement();
+
+            // Also refresh the print settings dropdown if same printer
+            const printSettingsPrinter = document.getElementById('printerSelect').value;
+            if (printSettingsPrinter === printerName) {
+                await loadPrintProfiles(printerName);
+            }
+        } else {
+            showToast('Error deleting profile: ' + result.error, 'error');
+        }
+    } catch (err) {
+        console.error('[App] Error deleting profile:', err);
+        showToast('Error deleting profile: ' + err.message, 'error');
+    }
+}
+
+async function copyProfile(profileId) {
+    const printerName = document.getElementById('manageProfilesPrinterSelect').value;
+    const profiles = cachedProfiles[printerName] || [];
+    const profile = profiles.find(p => p.id == profileId);
+
+    if (!profile) {
+        showToast('Profile not found', 'error');
+        return;
+    }
+
+    // Create a copy with a new name
+    const newName = profile.name + ' (Copy)';
+
+    const profileData = {
+        id: null,
+        name: newName,
+        printer_name: printerName,
+        copies: profile.copies,
+        paper_size: profile.paper_size,
+        orientation: profile.orientation,
+        paper_source: profile.paper_source,
+        is_default: false,
+        calibration_ab: profile.calibration_ab,
+        calibration_bc: profile.calibration_bc,
+        calibration_cd: profile.calibration_cd,
+        calibration_da: profile.calibration_da,
+        border_top: profile.border_top,
+        border_right: profile.border_right,
+        border_bottom: profile.border_bottom,
+        border_left: profile.border_left
+    };
+
+    try {
+        const result = await ipcRenderer.invoke('save-print-profile', profileData);
+
+        if (result.success) {
+            showToast('Profile copied!', 'success');
+
+            // Refresh the management list
+            delete cachedProfiles[printerName];
+            await loadProfilesForManagement();
+
+            // Also refresh the print settings dropdown if same printer
+            const printSettingsPrinter = document.getElementById('printerSelect').value;
+            if (printSettingsPrinter === printerName) {
+                await loadPrintProfiles(printerName);
+            }
+        } else {
+            showToast('Error copying profile: ' + result.error, 'error');
+        }
+    } catch (err) {
+        console.error('[App] Error copying profile:', err);
+        showToast('Error copying profile: ' + err.message, 'error');
+    }
+}
+
+// Helper functions
+function getPaperSizeLabel(size) {
+    const labels = {
+        'letter': 'Letter (8.5 x 11 in)',
+        'legal': 'Legal (8.5 x 14 in)',
+        'A4': 'A4 (210 x 297 mm)',
+        'A5': 'A5 (148 x 210 mm)'
+    };
+    return labels[size] || size;
+}
+
+function getPaperSourceLabel(source) {
+    const labels = {
+        'default': 'Default',
+        'rear': 'Rear Tray'
+    };
+    return labels[source] || source;
+}
+
+function capitalizeFirst(str) {
+    if (!str) return '';
+    return str.charAt(0).toUpperCase() + str.slice(1);
+}
+
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+async function confirmPrint() {
+    if (!currentPrintFilePath) {
+        showToast('No file to print', 'error');
+        return;
+    }
+
+    const printerSelect = document.getElementById('printerSelect');
+    const profileSelect = document.getElementById('printProfileSelect');
+    const copiesInput = document.getElementById('copiesInput');
+    const paperSizeSelect = document.getElementById('paperSizeSelect');
+    const orientationInput = document.querySelector('input[name="orientation"]:checked');
+    const paperSourceSelect = document.getElementById('paperSourceSelect');
+
+    const printerName = printerSelect.value;
+    const copies = parseInt(copiesInput.value) || 1;
+    const paperSize = paperSizeSelect.value;
+    const orientation = orientationInput ? orientationInput.value : 'landscape';
+    const paperSource = paperSourceSelect ? paperSourceSelect.value : 'default';
+
+    if (!printerName) {
+        showToast('Please select a printer', 'error');
+        return;
+    }
+
+    // Get calibration values from selected profile if any
+    let calibration_ab = null;
+    let calibration_bc = null;
+    let calibration_cd = null;
+    let calibration_da = null;
+    let border_top = null;
+    let border_right = null;
+    let border_bottom = null;
+    let border_left = null;
+
+    const profileId = profileSelect.value;
+    if (profileId) {
+        const profiles = cachedProfiles[printerName] || [];
+        const profile = profiles.find(p => p.id == profileId);
+        if (profile && profile.calibration_ab && profile.calibration_bc &&
+            profile.calibration_cd && profile.calibration_da) {
+            calibration_ab = profile.calibration_ab;
+            calibration_bc = profile.calibration_bc;
+            calibration_cd = profile.calibration_cd;
+            calibration_da = profile.calibration_da;
+            console.log('[App] Using calibration from profile:', {
+                ab: calibration_ab, bc: calibration_bc, cd: calibration_cd, da: calibration_da
+            });
+        }
+        // Get border calibration values (0 is valid)
+        if (profile) {
+            border_top = profile.border_top;
+            border_right = profile.border_right;
+            border_bottom = profile.border_bottom;
+            border_left = profile.border_left;
+            if (border_top !== null || border_right !== null || border_bottom !== null || border_left !== null) {
+                console.log('[App] Using border calibration from profile:', {
+                    top: border_top, right: border_right, bottom: border_bottom, left: border_left
+                });
+            }
+        }
+    }
+
+    console.log('[App] Printing with settings:', {
+        printer: printerName,
+        copies,
+        paperSize,
+        orientation,
+        paperSource,
+        calibration: calibration_ab ? 'yes' : 'no',
+        borderCalibration: (border_top !== null || border_right !== null || border_bottom !== null || border_left !== null) ? 'yes' : 'no',
+        file: currentPrintFilePath
+    });
+
+    const confirmButton = document.getElementById('confirmPrintButton');
+    confirmButton.disabled = true;
+    confirmButton.textContent = 'Printing...';
+
+    try {
+        const printResult = await ipcRenderer.invoke('print-image', currentPrintFilePath, {
+            showDialog: false,
+            printer: printerName,
+            copies: copies,
+            paperSize: paperSize,
+            orientation: orientation,
+            paperSource: paperSource,
+            calibration_ab: calibration_ab,
+            calibration_bc: calibration_bc,
+            calibration_cd: calibration_cd,
+            calibration_da: calibration_da,
+            border_top: border_top,
+            border_right: border_right,
+            border_bottom: border_bottom,
+            border_left: border_left
+        });
+
+        if (printResult.success) {
+            showToast('Sent to printer!', 'success');
+            closePrintSettingsModal();
+
+            // Call callback if provided
+            if (currentPrintCallback) {
+                currentPrintCallback(true);
+            }
+        } else {
+            showToast('Print error: ' + printResult.error, 'error');
+        }
+    } catch (err) {
+        console.error('[App] Error printing:', err);
+        showToast('Print error: ' + err.message, 'error');
+    } finally {
+        confirmButton.disabled = false;
+        confirmButton.textContent = 'Print';
+    }
+}
 
 // Close modal when clicking outside
 document.getElementById('rescueSelectModal').addEventListener('click', (e) => {
@@ -1059,6 +1850,24 @@ document.getElementById('deleteMultipleModal').addEventListener('click', (e) => 
 document.getElementById('printMultipleModal').addEventListener('click', (e) => {
     if (e.target.classList.contains('modal-overlay')) {
         closePrintMultipleModal();
+    }
+});
+
+document.getElementById('printSettingsModal').addEventListener('click', (e) => {
+    if (e.target.classList.contains('modal-overlay')) {
+        closePrintSettingsModal();
+    }
+});
+
+document.getElementById('manageProfilesModal').addEventListener('click', (e) => {
+    if (e.target.classList.contains('modal-overlay')) {
+        closeManageProfilesModal();
+    }
+});
+
+document.getElementById('saveProfileModal').addEventListener('click', (e) => {
+    if (e.target.classList.contains('modal-overlay')) {
+        closeSaveProfileDialog();
     }
 });
 
@@ -1473,6 +2282,151 @@ async function importSelectedAnimals() {
 
 // Note: Click handlers for image containers are now inline in HTML
 
+// ============================================================
+// Print Calibration Functions
+// ============================================================
+
+let expectedCalibrationDistance = 100; // Will be loaded from backend
+let expectedBorderInset = 5; // Will be loaded from backend
+
+// Load calibration info from backend
+async function loadCalibrationInfo() {
+    try {
+        const result = await ipcRenderer.invoke('get-calibration-info');
+        if (result.success) {
+            expectedCalibrationDistance = result.expectedDistance;
+            expectedBorderInset = result.expectedBorderInset || 5;
+            const distanceDisplay = document.getElementById('expectedDistanceDisplay');
+            if (distanceDisplay) {
+                distanceDisplay.textContent = expectedCalibrationDistance;
+            }
+            const borderDisplay = document.getElementById('expectedBorderDisplay');
+            if (borderDisplay) {
+                borderDisplay.textContent = expectedBorderInset;
+            }
+        }
+    } catch (err) {
+        console.error('[App] Error loading calibration info:', err);
+    }
+}
+
+// Print calibration test page
+async function printCalibrationPage() {
+    const printerName = document.getElementById('saveProfilePrinterName').value ||
+                       document.getElementById('printerSelect').value;
+
+    if (!printerName) {
+        showToast('Please select a printer first', 'error');
+        return;
+    }
+
+    try {
+        showToast('Printing calibration test page...', 'success');
+
+        const result = await ipcRenderer.invoke('print-calibration-page', {
+            printer: printerName,
+            showDialog: false,
+            paperSize: document.getElementById('paperSizeSelect')?.value || 'letter',
+            paperSource: document.getElementById('paperSourceSelect')?.value || 'default'
+        });
+
+        if (result.success) {
+            showToast('Calibration page sent to printer', 'success');
+        } else {
+            showToast('Error printing calibration page: ' + result.error, 'error');
+        }
+    } catch (err) {
+        console.error('[App] Error printing calibration page:', err);
+        showToast('Error printing calibration page: ' + err.message, 'error');
+    }
+}
+
+// Clear calibration values
+function clearCalibration() {
+    document.getElementById('calibrationAB').value = '';
+    document.getElementById('calibrationBC').value = '';
+    document.getElementById('calibrationCD').value = '';
+    document.getElementById('calibrationDA').value = '';
+    document.getElementById('borderTop').value = '';
+    document.getElementById('borderRight').value = '';
+    document.getElementById('borderBottom').value = '';
+    document.getElementById('borderLeft').value = '';
+    updateCalibrationStatus();
+}
+
+// Update calibration status indicator
+function updateCalibrationStatus() {
+    const ab = parseFloat(document.getElementById('calibrationAB').value);
+    const bc = parseFloat(document.getElementById('calibrationBC').value);
+    const cd = parseFloat(document.getElementById('calibrationCD').value);
+    const da = parseFloat(document.getElementById('calibrationDA').value);
+
+    const statusEl = document.getElementById('calibrationStatus');
+    if (!statusEl) return;
+
+    if (ab && bc && cd && da && ab > 0 && bc > 0 && cd > 0 && da > 0) {
+        statusEl.textContent = 'Calibrated';
+        statusEl.className = 'calibration-status calibrated';
+    } else {
+        statusEl.textContent = 'Not Calibrated';
+        statusEl.className = 'calibration-status not-calibrated';
+    }
+}
+
+// Get calibration values from inputs
+function getCalibrationValues() {
+    const ab = parseFloat(document.getElementById('calibrationAB').value) || null;
+    const bc = parseFloat(document.getElementById('calibrationBC').value) || null;
+    const cd = parseFloat(document.getElementById('calibrationCD').value) || null;
+    const da = parseFloat(document.getElementById('calibrationDA').value) || null;
+
+    // Border calibration values (0 is valid, so use different check)
+    const borderTopEl = document.getElementById('borderTop');
+    const borderRightEl = document.getElementById('borderRight');
+    const borderBottomEl = document.getElementById('borderBottom');
+    const borderLeftEl = document.getElementById('borderLeft');
+
+    const borderTop = borderTopEl && borderTopEl.value !== '' ? parseFloat(borderTopEl.value) : null;
+    const borderRight = borderRightEl && borderRightEl.value !== '' ? parseFloat(borderRightEl.value) : null;
+    const borderBottom = borderBottomEl && borderBottomEl.value !== '' ? parseFloat(borderBottomEl.value) : null;
+    const borderLeft = borderLeftEl && borderLeftEl.value !== '' ? parseFloat(borderLeftEl.value) : null;
+
+    if (ab && bc && cd && da) {
+        return {
+            ab, bc, cd, da,
+            borderTop, borderRight, borderBottom, borderLeft
+        };
+    }
+    return null;
+}
+
+// Set calibration values in inputs
+function setCalibrationValues(profile) {
+    document.getElementById('calibrationAB').value = profile.calibration_ab || '';
+    document.getElementById('calibrationBC').value = profile.calibration_bc || '';
+    document.getElementById('calibrationCD').value = profile.calibration_cd || '';
+    document.getElementById('calibrationDA').value = profile.calibration_da || '';
+    document.getElementById('borderTop').value = profile.border_top !== null && profile.border_top !== undefined ? profile.border_top : '';
+    document.getElementById('borderRight').value = profile.border_right !== null && profile.border_right !== undefined ? profile.border_right : '';
+    document.getElementById('borderBottom').value = profile.border_bottom !== null && profile.border_bottom !== undefined ? profile.border_bottom : '';
+    document.getElementById('borderLeft').value = profile.border_left !== null && profile.border_left !== undefined ? profile.border_left : '';
+    updateCalibrationStatus();
+}
+
+// Add event listeners for calibration inputs to update status
+document.addEventListener('DOMContentLoaded', () => {
+    const calibrationInputs = ['calibrationAB', 'calibrationBC', 'calibrationCD', 'calibrationDA'];
+    calibrationInputs.forEach(id => {
+        const el = document.getElementById(id);
+        if (el) {
+            el.addEventListener('input', updateCalibrationStatus);
+        }
+    });
+
+    // Load calibration info
+    loadCalibrationInfo();
+});
+
 // Initialize app when DOM is ready
 document.addEventListener('DOMContentLoaded', async () => {
     log('========== Electron app ready ==========');
@@ -1638,17 +2592,27 @@ async function printCardFront(animalId) {
             }
         }
 
-        // Open in GIMP via IPC (cross-platform)
-        console.log('[App] Opening GIMP...');
-        const gimpResult = await ipcRenderer.invoke('open-in-gimp', outputPath);
-        if (gimpResult.success) {
-            console.log('[App] GIMP launched successfully');
+        // Platform-specific handling
+        if (process.platform === 'win32') {
+            // Windows: Open in-app print dialog
+            console.log('[App] Opening print settings dialog...');
+            openPrintSettingsModal(outputPath, (success) => {
+                if (success) {
+                    console.log('[App] Card front printed successfully');
+                }
+            });
         } else {
-            console.error('[App] Error launching GIMP:', gimpResult.error);
-            showToast('Could not launch GIMP. Is it installed?', 'error');
+            // Linux/macOS: Open in GIMP
+            console.log('[App] Opening GIMP...');
+            const gimpResult = await ipcRenderer.invoke('open-in-gimp', outputPath);
+            if (gimpResult.success) {
+                console.log('[App] GIMP launched successfully');
+                showToast(`Card front generated for ${animal.name}!`);
+            } else {
+                console.error('[App] Error launching GIMP:', gimpResult.error);
+                showToast('Could not launch GIMP. Is it installed?', 'error');
+            }
         }
-
-        showToast(`Card front generated for ${animal.name}!`);
     } catch (err) {
         console.error('[App] Error printing card front:', err);
         console.error('[App] Error stack:', err.stack);
@@ -1745,17 +2709,27 @@ async function printCardBack(animalId) {
             }
         }
 
-        // Open in GIMP via IPC (cross-platform)
-        console.log('[App] Opening GIMP...');
-        const gimpResult = await ipcRenderer.invoke('open-in-gimp', outputPath);
-        if (gimpResult.success) {
-            console.log('[App] GIMP launched successfully');
+        // Platform-specific handling
+        if (process.platform === 'win32') {
+            // Windows: Open in-app print dialog
+            console.log('[App] Opening print settings dialog...');
+            openPrintSettingsModal(outputPath, (success) => {
+                if (success) {
+                    console.log('[App] Card back printed successfully');
+                }
+            });
         } else {
-            console.error('[App] Error launching GIMP:', gimpResult.error);
-            showToast('Could not launch GIMP. Is it installed?', 'error');
+            // Linux/macOS: Open in GIMP
+            console.log('[App] Opening GIMP...');
+            const gimpResult = await ipcRenderer.invoke('open-in-gimp', outputPath);
+            if (gimpResult.success) {
+                console.log('[App] GIMP launched successfully');
+                showToast(`Card back generated for ${animal.name}!`);
+            } else {
+                console.error('[App] Error launching GIMP:', gimpResult.error);
+                showToast('Could not launch GIMP. Is it installed?', 'error');
+            }
         }
-
-        showToast(`Card back generated for ${animal.name}!`);
     } catch (err) {
         console.error('[App] Error printing card back:', err);
         console.error('[App] Error stack:', err.stack);

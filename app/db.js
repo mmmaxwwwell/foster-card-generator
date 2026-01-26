@@ -222,6 +222,72 @@ function ensureSchema() {
         }
     }
 
+    // Create print_profiles table if it doesn't exist
+    const printProfilesResult = db.exec(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='print_profiles'"
+    );
+
+    if (printProfilesResult.length === 0) {
+        db.run(`
+            CREATE TABLE IF NOT EXISTS print_profiles (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                printer_name TEXT NOT NULL,
+                copies INTEGER NOT NULL DEFAULT 1,
+                paper_size TEXT NOT NULL DEFAULT 'letter',
+                orientation TEXT NOT NULL DEFAULT 'landscape',
+                paper_source TEXT NOT NULL DEFAULT 'default',
+                is_default INTEGER NOT NULL DEFAULT 0,
+                calibration_ab REAL,
+                calibration_bc REAL,
+                calibration_cd REAL,
+                calibration_da REAL,
+                border_top REAL,
+                border_right REAL,
+                border_bottom REAL,
+                border_left REAL,
+                created_at TEXT DEFAULT (datetime('now')),
+                updated_at TEXT DEFAULT (datetime('now'))
+            )
+        `);
+
+        db.run(`CREATE INDEX IF NOT EXISTS idx_print_profiles_printer ON print_profiles(printer_name)`);
+
+        db.run(`
+            CREATE TRIGGER IF NOT EXISTS update_print_profiles_timestamp
+            AFTER UPDATE ON print_profiles
+            BEGIN
+                UPDATE print_profiles SET updated_at = datetime('now') WHERE id = NEW.id;
+            END
+        `);
+
+        console.log('[DB] Created print_profiles table');
+    }
+
+    // Migration: Add calibration columns if they don't exist
+    const printProfileColumns = db.exec("PRAGMA table_info(print_profiles)");
+    if (printProfileColumns.length > 0) {
+        const columns = printProfileColumns[0].values;
+        const hasCalibrationAb = columns.some(col => col[1] === 'calibration_ab');
+        if (!hasCalibrationAb) {
+            db.run(`ALTER TABLE print_profiles ADD COLUMN calibration_ab REAL`);
+            db.run(`ALTER TABLE print_profiles ADD COLUMN calibration_bc REAL`);
+            db.run(`ALTER TABLE print_profiles ADD COLUMN calibration_cd REAL`);
+            db.run(`ALTER TABLE print_profiles ADD COLUMN calibration_da REAL`);
+            console.log('[DB] Added calibration columns to print_profiles table');
+        }
+
+        // Migration: Add border calibration columns if they don't exist
+        const hasBorderTop = columns.some(col => col[1] === 'border_top');
+        if (!hasBorderTop) {
+            db.run(`ALTER TABLE print_profiles ADD COLUMN border_top REAL`);
+            db.run(`ALTER TABLE print_profiles ADD COLUMN border_right REAL`);
+            db.run(`ALTER TABLE print_profiles ADD COLUMN border_bottom REAL`);
+            db.run(`ALTER TABLE print_profiles ADD COLUMN border_left REAL`);
+            console.log('[DB] Added border calibration columns to print_profiles table');
+        }
+    }
+
     return false; // Schema already existed
 }
 
@@ -598,6 +664,209 @@ function getRescueByScraperType(scraperType) {
     `, [scraperType]);
 }
 
+// ============================================================
+// Print Profile Operations
+// ============================================================
+
+/**
+ * Get all print profiles
+ * @returns {Array} - Array of print profile objects
+ */
+function getAllPrintProfiles() {
+    return queryAll(`
+        SELECT id, name, printer_name, copies, paper_size, orientation, paper_source, is_default,
+               calibration_ab, calibration_bc, calibration_cd, calibration_da,
+               border_top, border_right, border_bottom, border_left
+        FROM print_profiles
+        ORDER BY printer_name, name
+    `);
+}
+
+/**
+ * Get print profiles for a specific printer
+ * @param {string} printerName - Printer name
+ * @returns {Array} - Array of print profile objects
+ */
+function getPrintProfilesByPrinter(printerName) {
+    if (!db) throw new Error('Database not initialized');
+
+    const stmt = db.prepare(`
+        SELECT id, name, printer_name, copies, paper_size, orientation, paper_source, is_default,
+               calibration_ab, calibration_bc, calibration_cd, calibration_da,
+               border_top, border_right, border_bottom, border_left
+        FROM print_profiles
+        WHERE printer_name = ?
+        ORDER BY is_default DESC, name
+    `);
+    stmt.bind([printerName]);
+
+    const results = [];
+    while (stmt.step()) {
+        const columns = stmt.getColumnNames();
+        const values = stmt.get();
+        const row = {};
+        columns.forEach((col, i) => {
+            row[col] = values[i];
+        });
+        results.push(row);
+    }
+    stmt.free();
+
+    return results;
+}
+
+/**
+ * Get a print profile by ID
+ * @param {number} id - Profile ID
+ * @returns {Object|undefined} - Print profile object or undefined
+ */
+function getPrintProfileById(id) {
+    return queryOnePrepared(`
+        SELECT id, name, printer_name, copies, paper_size, orientation, paper_source, is_default,
+               calibration_ab, calibration_bc, calibration_cd, calibration_da,
+               border_top, border_right, border_bottom, border_left
+        FROM print_profiles
+        WHERE id = ?
+    `, [id]);
+}
+
+/**
+ * Get the default print profile for a printer
+ * @param {string} printerName - Printer name
+ * @returns {Object|undefined} - Print profile object or undefined
+ */
+function getDefaultPrintProfileForPrinter(printerName) {
+    return queryOnePrepared(`
+        SELECT id, name, printer_name, copies, paper_size, orientation, paper_source, is_default,
+               calibration_ab, calibration_bc, calibration_cd, calibration_da,
+               border_top, border_right, border_bottom, border_left
+        FROM print_profiles
+        WHERE printer_name = ? AND is_default = 1
+    `, [printerName]);
+}
+
+/**
+ * Create a new print profile
+ * @param {Object} profile - Profile data
+ * @returns {Object} - Result with lastInsertRowid
+ */
+function createPrintProfile(profile) {
+    if (!db) throw new Error('Database not initialized');
+
+    // If this is set as default, clear other defaults for this printer first
+    if (profile.is_default) {
+        runPrepared(
+            `UPDATE print_profiles SET is_default = 0 WHERE printer_name = ?`,
+            [profile.printer_name]
+        );
+    }
+
+    return runPrepared(`
+        INSERT INTO print_profiles (
+            name, printer_name, copies, paper_size, orientation, paper_source, is_default,
+            calibration_ab, calibration_bc, calibration_cd, calibration_da,
+            border_top, border_right, border_bottom, border_left
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `, [
+        profile.name,
+        profile.printer_name,
+        profile.copies || 1,
+        profile.paper_size || 'letter',
+        profile.orientation || 'landscape',
+        profile.paper_source || 'default',
+        profile.is_default ? 1 : 0,
+        profile.calibration_ab || null,
+        profile.calibration_bc || null,
+        profile.calibration_cd || null,
+        profile.calibration_da || null,
+        profile.border_top || null,
+        profile.border_right || null,
+        profile.border_bottom || null,
+        profile.border_left || null
+    ]);
+}
+
+/**
+ * Update an existing print profile
+ * @param {number} id - Profile ID
+ * @param {Object} profile - Profile data
+ * @returns {Object} - Result with changes count
+ */
+function updatePrintProfile(id, profile) {
+    if (!db) throw new Error('Database not initialized');
+
+    // If this is set as default, clear other defaults for this printer first
+    if (profile.is_default) {
+        runPrepared(
+            `UPDATE print_profiles SET is_default = 0 WHERE printer_name = ? AND id != ?`,
+            [profile.printer_name, id]
+        );
+    }
+
+    return runPrepared(`
+        UPDATE print_profiles SET
+            name = ?, printer_name = ?, copies = ?, paper_size = ?,
+            orientation = ?, paper_source = ?, is_default = ?,
+            calibration_ab = ?, calibration_bc = ?, calibration_cd = ?, calibration_da = ?,
+            border_top = ?, border_right = ?, border_bottom = ?, border_left = ?
+        WHERE id = ?
+    `, [
+        profile.name,
+        profile.printer_name,
+        profile.copies || 1,
+        profile.paper_size || 'letter',
+        profile.orientation || 'landscape',
+        profile.paper_source || 'default',
+        profile.is_default ? 1 : 0,
+        profile.calibration_ab || null,
+        profile.calibration_bc || null,
+        profile.calibration_cd || null,
+        profile.calibration_da || null,
+        profile.border_top || null,
+        profile.border_right || null,
+        profile.border_bottom || null,
+        profile.border_left || null,
+        id
+    ]);
+}
+
+/**
+ * Delete a print profile
+ * @param {number} id - Profile ID
+ * @returns {Object} - Result with changes count
+ */
+function deletePrintProfile(id) {
+    if (!db) throw new Error('Database not initialized');
+    return runPrepared('DELETE FROM print_profiles WHERE id = ?', [id]);
+}
+
+/**
+ * Set a print profile as the default for its printer
+ * @param {number} id - Profile ID
+ * @returns {Object} - Result with changes count
+ */
+function setDefaultPrintProfile(id) {
+    if (!db) throw new Error('Database not initialized');
+
+    // Get the printer name for this profile
+    const profile = getPrintProfileById(id);
+    if (!profile) {
+        throw new Error('Profile not found');
+    }
+
+    // Clear other defaults for this printer
+    runPrepared(
+        `UPDATE print_profiles SET is_default = 0 WHERE printer_name = ?`,
+        [profile.printer_name]
+    );
+
+    // Set this one as default
+    return runPrepared(
+        `UPDATE print_profiles SET is_default = 1 WHERE id = ?`,
+        [id]
+    );
+}
+
 // Export all functions
 module.exports = {
     // Connection management
@@ -625,5 +894,15 @@ module.exports = {
     // Rescue operations
     getAllRescues,
     getRescueById,
-    getRescueByScraperType
+    getRescueByScraperType,
+
+    // Print profile operations
+    getAllPrintProfiles,
+    getPrintProfilesByPrinter,
+    getPrintProfileById,
+    getDefaultPrintProfileForPrinter,
+    createPrintProfile,
+    updatePrintProfile,
+    deletePrintProfile,
+    setDefaultPrintProfile
 };

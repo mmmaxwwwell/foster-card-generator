@@ -6,7 +6,42 @@ const os = require('os');
 const QRCode = require('qrcode');
 const Handlebars = require('handlebars');
 const fsSync = require('fs');
+const sharp = require('sharp');
 const { getOutputDir } = require('./paths.js');
+
+// DPI configuration - default 360 DPI for high-quality printing
+const DEFAULT_DPI = 360;
+
+// CSS standard DPI (browsers always render CSS inches at 96 DPI)
+const CSS_DPI = 96;
+
+// Page dimensions in inches (US Letter landscape)
+const PAGE_WIDTH_INCHES = 11;
+const PAGE_HEIGHT_INCHES = 8.5;
+
+/**
+ * Calculate viewport dimensions based on target DPI
+ * CSS uses a fixed 96 DPI for physical units (inches, cm, etc.)
+ * To achieve higher DPI output, we use deviceScaleFactor to scale up
+ *
+ * @param {number} dpi - Target DPI (dots per inch)
+ * @returns {{width: number, height: number, deviceScaleFactor: number}}
+ */
+function calculateViewport(dpi = DEFAULT_DPI) {
+    // Viewport in CSS pixels (at 96 DPI)
+    const width = Math.round(PAGE_WIDTH_INCHES * CSS_DPI);
+    const height = Math.round(PAGE_HEIGHT_INCHES * CSS_DPI);
+
+    // Scale factor to achieve target DPI
+    // e.g., for 360 DPI: 360/96 = 3.75
+    const deviceScaleFactor = dpi / CSS_DPI;
+
+    return {
+        width,
+        height,
+        deviceScaleFactor
+    };
+}
 
 // Enable verbose logging
 console.log('[Card Gen] Script started');
@@ -140,7 +175,7 @@ async function replaceParametersInHtml(fileName, outputPath, params) {
     console.log(`[Card Gen] Written to: ${outputFilePath}`);
 }
 
-async function capture(page, outputPath) {
+async function capture(page, outputPath, dpi = DEFAULT_DPI) {
     console.log('[Card Gen] Capturing screenshot...');
     const div = await page.$("#page");
     if (!div) {
@@ -149,9 +184,13 @@ async function capture(page, outputPath) {
     const bounding_box = await div.boundingBox();
     console.log('[Card Gen] Bounding box:', bounding_box);
 
-    // Use PNG for better DPI metadata preservation
-    await page.screenshot({
-        path: outputPath,
+    // Calculate exact target dimensions for the output
+    const targetWidth = Math.round(PAGE_WIDTH_INCHES * dpi);
+    const targetHeight = Math.round(PAGE_HEIGHT_INCHES * dpi);
+    console.log(`[Card Gen] Target dimensions: ${targetWidth}x${targetHeight} pixels (${dpi} DPI)`);
+
+    // Capture screenshot to buffer first
+    const screenshotBuffer = await page.screenshot({
         clip: {
             x: bounding_box.x,
             y: bounding_box.y,
@@ -160,11 +199,20 @@ async function capture(page, outputPath) {
         },
         type: 'png'
     });
-    console.log('[Card Gen] Screenshot captured to:', outputPath);
+    console.log('[Card Gen] Screenshot captured to buffer');
+
+    // Use sharp to resize to exact dimensions and embed DPI metadata
+    // This ensures the output is exactly 11x8.5 inches at the target DPI
+    await sharp(screenshotBuffer)
+        .resize(targetWidth, targetHeight, { fit: 'fill' })
+        .withMetadata({ density: dpi })
+        .toFile(outputPath);
+    console.log(`[Card Gen] Screenshot saved: ${targetWidth}x${targetHeight}px at ${dpi} DPI to: ${outputPath}`);
 }
 
-async function generateCardFront(params) {
+async function generateCardFront(params, dpi = DEFAULT_DPI) {
     console.log('[Card Gen] Starting card front generation...');
+    console.log(`[Card Gen] Target DPI: ${dpi}`);
     console.log('[Card Gen] Launching Puppeteer browser...');
     const { launchBrowser } = require('./browser-helper.js');
     const browser = await launchBrowser();
@@ -179,12 +227,9 @@ async function generateCardFront(params) {
     await replaceParametersInHtml("card-front.html", tmpPath, params);
     console.log('[Card Gen] HTML template processed');
 
-    await page.setViewport({
-        width: 3840,
-        height: 2160,
-        deviceScaleFactor: 2
-    });
-    console.log('[Card Gen] Viewport set');
+    const viewport = calculateViewport(dpi);
+    await page.setViewport(viewport);
+    console.log(`[Card Gen] Viewport set: ${viewport.width}x${viewport.height} (${dpi} DPI)`);
 
     const htmlPath = `file://${path.join(tmpPath, 'card-front.html')}`;
     console.log('[Card Gen] Loading page:', htmlPath);
@@ -198,7 +243,7 @@ async function generateCardFront(params) {
 
     const outputPath = path.join(outputDir, `${params.name}-card-front.png`);
     console.log('[Card Gen] Output path:', outputPath);
-    await capture(page, outputPath);
+    await capture(page, outputPath, dpi);
 
     console.log('[Card Gen] Closing browser...');
     await browser.close();
@@ -209,8 +254,9 @@ async function generateCardFront(params) {
     return outputPath;
 }
 
-async function generateCardBack(params) {
+async function generateCardBack(params, dpi = DEFAULT_DPI) {
     console.log('[Card Gen] Starting card back generation...');
+    console.log(`[Card Gen] Target DPI: ${dpi}`);
     console.log('[Card Gen] Launching Puppeteer browser...');
     const { launchBrowser } = require('./browser-helper.js');
     const browser = await launchBrowser();
@@ -225,12 +271,9 @@ async function generateCardBack(params) {
     await replaceParametersInHtml("card-back.html", tmpPath, params);
     console.log('[Card Gen] HTML template processed');
 
-    await page.setViewport({
-        width: 3840,
-        height: 2160,
-        deviceScaleFactor: 2
-    });
-    console.log('[Card Gen] Viewport set');
+    const viewport = calculateViewport(dpi);
+    await page.setViewport(viewport);
+    console.log(`[Card Gen] Viewport set: ${viewport.width}x${viewport.height} (${dpi} DPI)`);
 
     const htmlPath = `file://${path.join(tmpPath, 'card-back.html')}`;
     console.log('[Card Gen] Loading page:', htmlPath);
@@ -244,7 +287,7 @@ async function generateCardBack(params) {
 
     const outputPath = path.join(outputDir, `${params.name}-card-back.png`);
     console.log('[Card Gen] Output path:', outputPath);
-    await capture(page, outputPath);
+    await capture(page, outputPath, dpi);
 
     console.log('[Card Gen] Closing browser...');
     await browser.close();
@@ -258,7 +301,9 @@ async function generateCardBack(params) {
 // Export functions for direct use in Electron
 module.exports = {
     generateCardFront,
-    generateCardBack
+    generateCardBack,
+    DEFAULT_DPI,
+    calculateViewport
 };
 
 // CLI execution - only run if called directly (not required as a module)
