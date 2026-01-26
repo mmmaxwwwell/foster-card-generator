@@ -240,12 +240,24 @@ function renderAnimalCard(animal, rescue) {
     const dogs = formatCompatibility(animal.dogs);
     const cats = formatCompatibility(animal.cats);
 
-    // Build logo path from src directory
-    const srcDir = path.join(__dirname, '..', '..', 'src');
-    const logoPath = rescue ? path.join(srcDir, rescue.logo_path) : null;
-    const logoDataUrl = logoPath && fs.existsSync(logoPath)
-        ? `data:image/${rescue.logo_path.endsWith('.png') ? 'png' : 'jpeg'};base64,${fs.readFileSync(logoPath).toString('base64')}`
-        : null;
+    // Get logo from database (prefer logo_data blob, fall back to file)
+    let logoDataUrl = null;
+    if (rescue) {
+        if (rescue.logo_data) {
+            // Use logo stored in database
+            const mimeType = rescue.logo_mime || (rescue.logo_path.endsWith('.png') ? 'image/png' : 'image/jpeg');
+            const base64 = Buffer.from(rescue.logo_data).toString('base64');
+            logoDataUrl = `data:${mimeType};base64,${base64}`;
+        } else {
+            // Fallback to file-based logo
+            const srcDir = path.join(__dirname, '..', '..', 'src');
+            const logoPath = path.join(srcDir, rescue.logo_path);
+            if (fs.existsSync(logoPath)) {
+                const mimeType = rescue.logo_path.endsWith('.png') ? 'image/png' : 'image/jpeg';
+                logoDataUrl = `data:${mimeType};base64,${fs.readFileSync(logoPath).toString('base64')}`;
+            }
+        }
+    }
 
     return `
         <div class="animal-card" data-id="${animal.id}">
@@ -325,6 +337,9 @@ async function loadAnimals() {
         // Load rescues for later use
         rescues = db.getAllRescues();
         console.log('[App] Loaded', rescues.length, 'rescues');
+
+        // Update rescue dropdowns with dynamic options
+        updateRescueDropdowns();
 
         animals = db.getAllAnimals();
 
@@ -2658,10 +2673,12 @@ async function printCardFront(animalId) {
             portraitFilePath: portraitFilePath,
             rescueName: rescue ? rescue.name : 'Paws Rescue League',
             rescueWebsite: rescue ? rescue.website : 'pawsrescueleague.org',
-            rescueLogo: rescue ? rescue.logo_path : 'logo.png'
+            rescueLogo: rescue ? rescue.logo_path : 'logo.png',
+            rescueLogoData: rescue && rescue.logo_data ? Buffer.from(rescue.logo_data).toString('base64') : null,
+            rescueLogoMime: rescue ? rescue.logo_mime : null
         };
 
-        console.log('[App] Parameters prepared:', JSON.stringify({...params}));
+        console.log('[App] Parameters prepared:', JSON.stringify({...params, rescueLogoData: params.rescueLogoData ? '[BASE64]' : null}));
 
         // Call the card generation function directly (no subprocess needed)
         const outputPath = await generateCardFront(params);
@@ -2775,10 +2792,12 @@ async function printCardBack(animalId) {
             portraitFilePath: portraitFilePath,
             rescueName: rescue ? rescue.name : 'Paws Rescue League',
             rescueWebsite: rescue ? rescue.website : 'pawsrescueleague.org',
-            rescueLogo: rescue ? rescue.logo_path : 'logo.png'
+            rescueLogo: rescue ? rescue.logo_path : 'logo.png',
+            rescueLogoData: rescue && rescue.logo_data ? Buffer.from(rescue.logo_data).toString('base64') : null,
+            rescueLogoMime: rescue ? rescue.logo_mime : null
         };
 
-        console.log('[App] Parameters prepared:', JSON.stringify({...params}));
+        console.log('[App] Parameters prepared:', JSON.stringify({...params, rescueLogoData: params.rescueLogoData ? '[BASE64]' : null}));
 
         // Call the card generation function directly (no subprocess needed)
         const outputPath = await generateCardBack(params);
@@ -2831,3 +2850,282 @@ async function printCardBack(animalId) {
         }
     }
 }
+
+// ============================================================
+// Rescue Management Modal functions
+// ============================================================
+
+let currentEditRescue = null;
+let pendingRescueLogoData = null;
+
+function openManageRescuesModal() {
+    document.getElementById('manageRescuesModal').classList.add('active');
+    loadRescueList();
+}
+
+function closeManageRescuesModal() {
+    document.getElementById('manageRescuesModal').classList.remove('active');
+}
+
+function loadRescueList() {
+    const listContainer = document.getElementById('rescueList');
+
+    try {
+        const allRescues = db.getAllRescues();
+
+        if (allRescues.length === 0) {
+            listContainer.innerHTML = '<div class="profile-empty">No rescue organizations found. Click "Add New Rescue" to create one.</div>';
+            return;
+        }
+
+        let html = '';
+        for (const rescue of allRescues) {
+            // Get logo as data URL
+            let logoHtml = '';
+            if (rescue.logo_data) {
+                const mimeType = rescue.logo_mime || 'image/png';
+                const base64 = Buffer.from(rescue.logo_data).toString('base64');
+                logoHtml = `<img src="data:${mimeType};base64,${base64}" style="width: 40px; height: 40px; object-fit: contain; margin-right: 12px; border-radius: 4px; background: #f5f5f5;">`;
+            } else {
+                logoHtml = `<div style="width: 40px; height: 40px; background: #f0f0f0; border-radius: 4px; margin-right: 12px; display: flex; align-items: center; justify-content: center; color: #999; font-size: 0.8rem;">Logo</div>`;
+            }
+
+            html += `
+                <div class="profile-item" style="display: flex; align-items: center;">
+                    ${logoHtml}
+                    <div class="profile-item-info" style="flex: 1;">
+                        <div class="profile-item-name">${escapeHtml(rescue.name)}</div>
+                        <div class="profile-item-settings">
+                            ${rescue.website ? escapeHtml(rescue.website) : 'No website'}
+                            ${rescue.scraper_type ? ` | Scraper: ${rescue.scraper_type}` : ''}
+                        </div>
+                    </div>
+                    <div class="profile-item-actions">
+                        <button class="btn btn-secondary" onclick="openEditRescueModal(${rescue.id})">Edit</button>
+                    </div>
+                </div>
+            `;
+        }
+
+        listContainer.innerHTML = html;
+    } catch (err) {
+        console.error('[App] Error loading rescues:', err);
+        listContainer.innerHTML = `<div class="profile-empty" style="color: #dc3545;">Error loading rescues: ${err.message}</div>`;
+    }
+}
+
+function openAddRescueModal() {
+    currentEditRescue = null;
+    pendingRescueLogoData = null;
+
+    document.getElementById('editRescueTitle').textContent = 'Add Rescue Organization';
+    document.getElementById('editRescueId').value = '';
+    document.getElementById('rescueNameInput').value = '';
+    document.getElementById('rescueWebsiteInput').value = '';
+    document.getElementById('rescueOrgIdInput').value = '';
+    document.getElementById('rescueScraperTypeSelect').value = '';
+
+    // Reset logo preview
+    document.getElementById('rescueLogoPreview').style.display = 'none';
+    document.getElementById('rescueLogoNoImage').style.display = 'flex';
+
+    // Hide delete button for new rescues
+    document.getElementById('deleteRescueBtn').style.display = 'none';
+
+    document.getElementById('editRescueModal').classList.add('active');
+}
+
+function openEditRescueModal(rescueId) {
+    const rescue = db.getRescueById(rescueId);
+    if (!rescue) {
+        showToast('Rescue not found', 'error');
+        return;
+    }
+
+    currentEditRescue = rescue;
+    pendingRescueLogoData = null;
+
+    document.getElementById('editRescueTitle').textContent = 'Edit Rescue Organization';
+    document.getElementById('editRescueId').value = rescue.id;
+    document.getElementById('rescueNameInput').value = rescue.name || '';
+    document.getElementById('rescueWebsiteInput').value = rescue.website || '';
+    document.getElementById('rescueOrgIdInput').value = rescue.org_id || '';
+    document.getElementById('rescueScraperTypeSelect').value = rescue.scraper_type || '';
+
+    // Set logo preview
+    const logoPreview = document.getElementById('rescueLogoPreview');
+    const logoNoImage = document.getElementById('rescueLogoNoImage');
+
+    if (rescue.logo_data) {
+        const mimeType = rescue.logo_mime || 'image/png';
+        const base64 = Buffer.from(rescue.logo_data).toString('base64');
+        logoPreview.src = `data:${mimeType};base64,${base64}`;
+        logoPreview.style.display = 'block';
+        logoNoImage.style.display = 'none';
+    } else {
+        logoPreview.style.display = 'none';
+        logoNoImage.style.display = 'flex';
+    }
+
+    // Show delete button for existing rescues
+    document.getElementById('deleteRescueBtn').style.display = 'block';
+
+    document.getElementById('editRescueModal').classList.add('active');
+}
+
+function closeEditRescueModal() {
+    document.getElementById('editRescueModal').classList.remove('active');
+    currentEditRescue = null;
+    pendingRescueLogoData = null;
+}
+
+async function handleRescueLogoSelected(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+
+    try {
+        const arrayBuffer = await file.arrayBuffer();
+        const uint8Array = new Uint8Array(arrayBuffer);
+
+        // Convert to hex string for database
+        let hexString = '';
+        for (let i = 0; i < uint8Array.length; i++) {
+            hexString += uint8Array[i].toString(16).padStart(2, '0');
+        }
+
+        pendingRescueLogoData = {
+            hex: hexString,
+            mime: file.type || 'image/png',
+            path: file.name
+        };
+
+        // Convert to base64 for preview
+        let binary = '';
+        for (let i = 0; i < uint8Array.length; i++) {
+            binary += String.fromCharCode(uint8Array[i]);
+        }
+        const base64 = btoa(binary);
+        const dataUrl = `data:${file.type};base64,${base64}`;
+
+        // Update preview
+        const logoPreview = document.getElementById('rescueLogoPreview');
+        const logoNoImage = document.getElementById('rescueLogoNoImage');
+        logoPreview.src = dataUrl;
+        logoPreview.style.display = 'block';
+        logoNoImage.style.display = 'none';
+
+        showToast('Logo selected. Click Save to apply.');
+    } catch (err) {
+        console.error('[App] Error loading logo:', err);
+        showToast('Error loading logo: ' + err.message, 'error');
+    }
+}
+
+async function saveRescue() {
+    const name = document.getElementById('rescueNameInput').value.trim();
+    const website = document.getElementById('rescueWebsiteInput').value.trim();
+    const orgId = document.getElementById('rescueOrgIdInput').value.trim();
+    const scraperType = document.getElementById('rescueScraperTypeSelect').value;
+    const rescueId = document.getElementById('editRescueId').value;
+
+    if (!name) {
+        showToast('Please enter a rescue name', 'error');
+        return;
+    }
+
+    const rescueData = {
+        name: name,
+        website: website || null,
+        org_id: orgId || null,
+        scraper_type: scraperType || null
+    };
+
+    try {
+        if (rescueId) {
+            // Update existing rescue
+            db.updateRescue(parseInt(rescueId), rescueData, pendingRescueLogoData);
+            showToast(`${name} updated successfully!`);
+        } else {
+            // Create new rescue
+            db.createRescue(rescueData, pendingRescueLogoData);
+            showToast(`${name} created successfully!`);
+        }
+
+        closeEditRescueModal();
+        loadRescueList();
+
+        // Refresh the rescues cache and update dropdowns
+        rescues = db.getAllRescues();
+        updateRescueDropdowns();
+
+    } catch (err) {
+        console.error('[App] Error saving rescue:', err);
+        showToast('Error saving rescue: ' + err.message, 'error');
+    }
+}
+
+async function deleteCurrentRescue() {
+    if (!currentEditRescue) return;
+
+    const confirmed = confirm(`Are you sure you want to delete "${currentEditRescue.name}"?\n\nThis cannot be undone.`);
+    if (!confirmed) return;
+
+    try {
+        db.deleteRescue(currentEditRescue.id);
+        showToast(`${currentEditRescue.name} deleted successfully!`);
+
+        closeEditRescueModal();
+        loadRescueList();
+
+        // Refresh the rescues cache and update dropdowns
+        rescues = db.getAllRescues();
+        updateRescueDropdowns();
+
+    } catch (err) {
+        console.error('[App] Error deleting rescue:', err);
+        showToast('Error: ' + err.message, 'error');
+    }
+}
+
+// Update all rescue dropdown selects with current rescues
+function updateRescueDropdowns() {
+    const dropdownIds = ['newRescue', 'rescue'];
+
+    for (const dropdownId of dropdownIds) {
+        const dropdown = document.getElementById(dropdownId);
+        if (!dropdown) continue;
+
+        // Store current selection
+        const currentValue = dropdown.value;
+
+        // Clear and repopulate
+        dropdown.innerHTML = '';
+
+        for (const rescue of rescues) {
+            const option = document.createElement('option');
+            option.value = rescue.id;
+            option.textContent = rescue.name;
+            dropdown.appendChild(option);
+        }
+
+        // Restore selection if still valid
+        if (currentValue && rescues.find(r => r.id == currentValue)) {
+            dropdown.value = currentValue;
+        } else if (rescues.length > 0) {
+            dropdown.value = rescues[0].id;
+        }
+    }
+}
+
+// Add event listener for clicking outside the modal
+document.getElementById('manageRescuesModal').addEventListener('click', (e) => {
+    if (e.target.classList.contains('modal-overlay')) {
+        closeManageRescuesModal();
+    }
+});
+
+document.getElementById('editRescueModal').addEventListener('click', (e) => {
+    if (e.target.classList.contains('modal-overlay')) {
+        closeEditRescueModal();
+    }
+});

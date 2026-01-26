@@ -1025,6 +1025,7 @@
             <button onclick="openPrintMultipleModal()">Print Multiple</button>
             <button onclick="openDeleteMultipleModal()" class="btn-danger-outline">Delete Multiple</button>
             <button onclick="openManageProfilesFromMain()">Manage Print Profiles</button>
+            <button onclick="openManageRescuesModal()">Manage Rescues</button>
         </div>
 
         <div id="content" class="loading">
@@ -1184,8 +1185,7 @@
                         <div class="form-group">
                             <label for="newRescue">Rescue Organization</label>
                             <select id="newRescue" required>
-                                <option value="1" selected>Paws Rescue League</option>
-                                <option value="2">Brass City Rescue</option>
+                                <!-- Populated dynamically -->
                             </select>
                         </div>
                     </div>
@@ -1308,8 +1308,7 @@
                         <div class="form-group">
                             <label for="rescue">Rescue Organization</label>
                             <select id="rescue" required>
-                                <option value="1">Paws Rescue League</option>
-                                <option value="2">Brass City Rescue</option>
+                                <!-- Populated dynamically -->
                             </select>
                         </div>
                     </div>
@@ -1691,6 +1690,85 @@
             <div class="modal-footer">
                 <button class="btn btn-secondary" onclick="closeSaveProfileDialog()">Cancel</button>
                 <button class="btn btn-primary" onclick="saveProfile()">Save Profile</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Manage Rescues Modal -->
+    <div id="manageRescuesModal" class="modal-overlay">
+        <div class="modal" style="max-width: 600px;">
+            <div class="modal-header">
+                <h2>Manage Rescue Organizations</h2>
+                <button class="modal-close" onclick="closeManageRescuesModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div id="rescueListContainer">
+                    <div class="profile-list" id="rescueList">
+                        <div class="profile-empty">Loading rescues...</div>
+                    </div>
+                </div>
+
+                <button type="button" class="btn btn-primary" onclick="openAddRescueModal()" style="width: 100%; margin-top: 15px;">
+                    + Add New Rescue
+                </button>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeManageRescuesModal()">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Add/Edit Rescue Modal -->
+    <div id="editRescueModal" class="modal-overlay">
+        <div class="modal" style="max-width: 500px;">
+            <div class="modal-header">
+                <h2 id="editRescueTitle">Add Rescue Organization</h2>
+                <button class="modal-close" onclick="closeEditRescueModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="editRescueId" value="">
+
+                <input type="file" id="rescueLogoInput" accept="image/jpeg,image/jpg,image/png,image/gif,image/webp" style="display: none;" onchange="handleRescueLogoSelected(event)">
+                <div class="modal-image-container" onclick="document.getElementById('rescueLogoInput').click()" style="margin-bottom: 20px;">
+                    <img id="rescueLogoPreview" class="modal-image" src="" alt="" style="display: none; max-height: 120px; object-fit: contain;">
+                    <div id="rescueLogoNoImage" class="modal-no-image" style="height: 120px; font-size: 2rem;">Logo</div>
+                    <div class="image-overlay">
+                        <div class="image-overlay-text">
+                            <span>📷</span>
+                            Click to set logo
+                        </div>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label for="rescueNameInput">Name *</label>
+                    <input type="text" id="rescueNameInput" placeholder="e.g., Happy Tails Rescue" required>
+                </div>
+
+                <div class="form-group">
+                    <label for="rescueWebsiteInput">Website</label>
+                    <input type="text" id="rescueWebsiteInput" placeholder="e.g., https://example.com">
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="rescueOrgIdInput">Organization ID</label>
+                        <input type="text" id="rescueOrgIdInput" placeholder="For scraper (optional)">
+                    </div>
+                    <div class="form-group">
+                        <label for="rescueScraperTypeSelect">Scraper Type</label>
+                        <select id="rescueScraperTypeSelect">
+                            <option value="">None</option>
+                            <option value="wagtopia">Wagtopia</option>
+                            <option value="adoptapet">Adoptapet</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-danger" onclick="deleteCurrentRescue()" id="deleteRescueBtn" style="display: none;">Delete</button>
+                <button class="btn btn-secondary" onclick="closeEditRescueModal()">Cancel</button>
+                <button class="btn btn-primary" onclick="saveRescue()">Save Rescue</button>
             </div>
         </div>
     </div>

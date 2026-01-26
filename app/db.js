@@ -122,8 +122,8 @@ async function initializeAsync() {
         console.log(`[DB] Applied ${appliedMigrations.length} migration(s)`);
     }
 
-    // Seed default data if needed
-    seedDefaults(db, saveDatabase);
+    // Seed default data if needed (async - downloads logos)
+    await seedDefaults(db, saveDatabase);
 
     // Save after schema/seed changes
     saveDatabase();
@@ -528,7 +528,7 @@ function deleteAnimals(ids) {
  */
 function getAllRescues() {
     return queryAll(`
-        SELECT id, name, website, logo_path, org_id, scraper_type
+        SELECT id, name, website, logo_path, logo_data, logo_mime, org_id, scraper_type
         FROM rescues
         ORDER BY name
     `);
@@ -541,7 +541,7 @@ function getAllRescues() {
  */
 function getRescueById(id) {
     return queryOnePrepared(`
-        SELECT id, name, website, logo_path, org_id, scraper_type
+        SELECT id, name, website, logo_path, logo_data, logo_mime, org_id, scraper_type
         FROM rescues
         WHERE id = ?
     `, [id]);
@@ -554,10 +554,133 @@ function getRescueById(id) {
  */
 function getRescueByScraperType(scraperType) {
     return queryOnePrepared(`
-        SELECT id, name, website, logo_path, org_id, scraper_type
+        SELECT id, name, website, logo_path, logo_data, logo_mime, org_id, scraper_type
         FROM rescues
         WHERE scraper_type = ?
     `, [scraperType]);
+}
+
+/**
+ * Get rescue logo as data URL
+ * @param {number} rescueId - Rescue ID
+ * @returns {string|null} - Data URL or null if no logo
+ */
+function getRescueLogoAsDataUrl(rescueId) {
+    if (!db) throw new Error('Database not initialized');
+
+    const row = queryOnePrepared(
+        'SELECT logo_mime, logo_data FROM rescues WHERE id = ?',
+        [rescueId]
+    );
+
+    if (!row || !row.logo_mime || !row.logo_data) {
+        return null;
+    }
+
+    const buffer = Buffer.from(row.logo_data);
+    const base64 = buffer.toString('base64');
+    return `data:${row.logo_mime};base64,${base64}`;
+}
+
+/**
+ * Create a new rescue
+ * @param {Object} rescue - Rescue data
+ * @param {Object} logoData - Optional logo data { hex, mime, path }
+ * @returns {Object} - Result with lastInsertRowid
+ */
+function createRescue(rescue, logoData = null) {
+    if (!db) throw new Error('Database not initialized');
+
+    if (logoData) {
+        const logoBuffer = Buffer.from(logoData.hex, 'hex');
+
+        return runPrepared(`
+            INSERT INTO rescues (name, website, logo_path, logo_data, logo_mime, org_id, scraper_type)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        `, [
+            rescue.name,
+            rescue.website || null,
+            logoData.path || null,
+            logoBuffer,
+            logoData.mime,
+            rescue.org_id || null,
+            rescue.scraper_type || null
+        ]);
+    } else {
+        return runPrepared(`
+            INSERT INTO rescues (name, website, org_id, scraper_type)
+            VALUES (?, ?, ?, ?)
+        `, [
+            rescue.name,
+            rescue.website || null,
+            rescue.org_id || null,
+            rescue.scraper_type || null
+        ]);
+    }
+}
+
+/**
+ * Update an existing rescue
+ * @param {number} id - Rescue ID
+ * @param {Object} rescue - Rescue data
+ * @param {Object} logoData - Optional logo data { hex, mime, path }
+ * @returns {Object} - Result with changes count
+ */
+function updateRescue(id, rescue, logoData = null) {
+    if (!db) throw new Error('Database not initialized');
+
+    if (logoData) {
+        const logoBuffer = Buffer.from(logoData.hex, 'hex');
+
+        return runPrepared(`
+            UPDATE rescues SET
+                name = ?, website = ?, logo_path = ?, logo_data = ?, logo_mime = ?,
+                org_id = ?, scraper_type = ?
+            WHERE id = ?
+        `, [
+            rescue.name,
+            rescue.website || null,
+            logoData.path || null,
+            logoBuffer,
+            logoData.mime,
+            rescue.org_id || null,
+            rescue.scraper_type || null,
+            id
+        ]);
+    } else {
+        return runPrepared(`
+            UPDATE rescues SET
+                name = ?, website = ?, org_id = ?, scraper_type = ?
+            WHERE id = ?
+        `, [
+            rescue.name,
+            rescue.website || null,
+            rescue.org_id || null,
+            rescue.scraper_type || null,
+            id
+        ]);
+    }
+}
+
+/**
+ * Delete a rescue by ID
+ * @param {number} id - Rescue ID
+ * @returns {Object} - Result with changes count
+ */
+function deleteRescue(id) {
+    if (!db) throw new Error('Database not initialized');
+
+    // Check if any animals reference this rescue
+    const animalCount = queryOnePrepared(
+        'SELECT COUNT(*) as count FROM animals WHERE rescue_id = ?',
+        [id]
+    );
+
+    if (animalCount && animalCount.count > 0) {
+        throw new Error(`Cannot delete rescue: ${animalCount.count} animal(s) are associated with it`);
+    }
+
+    return runPrepared('DELETE FROM rescues WHERE id = ?', [id]);
 }
 
 // ============================================================
@@ -795,6 +918,10 @@ module.exports = {
     getAllRescues,
     getRescueById,
     getRescueByScraperType,
+    getRescueLogoAsDataUrl,
+    createRescue,
+    updateRescue,
+    deleteRescue,
 
     // Print profile operations
     getAllPrintProfiles,

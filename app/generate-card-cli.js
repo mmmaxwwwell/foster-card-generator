@@ -76,12 +76,18 @@ async function createTempDir(params) {
                 .then(async () => {
                     console.log('[Card Gen] Base assets copied successfully');
 
-                    // Copy the rescue logo (use rescueLogo param or default to logo.png)
+                    // Handle rescue logo (prefer base64 data, fall back to file)
                     const logoFilename = params.rescueLogo || 'logo.png';
-                    const logoSrcPath = path.join(srcDir, logoFilename);
                     const logoDestPath = path.join(tmpPath, logoFilename);
-                    console.log(`[Card Gen] Copying rescue logo ${logoFilename} from ${logoSrcPath} to ${logoDestPath}`);
-                    await fs.copyFile(logoSrcPath, logoDestPath);
+                    if (params.rescueLogoData) {
+                        console.log(`[Card Gen] Writing rescue logo ${logoFilename} from base64 data`);
+                        const logoBuffer = Buffer.from(params.rescueLogoData, 'base64');
+                        await fs.writeFile(logoDestPath, logoBuffer);
+                    } else {
+                        const logoSrcPath = path.join(srcDir, logoFilename);
+                        console.log(`[Card Gen] Copying rescue logo ${logoFilename} from ${logoSrcPath} to ${logoDestPath}`);
+                        await fs.copyFile(logoSrcPath, logoDestPath);
+                    }
                     // Copy the portrait image from file path or write from base64 data
                     if (params.portraitFilePath) {
                         console.log('[Card Gen] Copying portrait from file path:', params.portraitFilePath);
