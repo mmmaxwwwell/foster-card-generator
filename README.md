@@ -275,7 +275,7 @@ Your data is never uploaded to external servers.
 
 ## Support
 
-For bug reports and feature requests, please visit the [Issues](../../issues) page on GitHub.
+Something not working? Have an idea for a new feature? [Open an issue on GitHub](https://github.com/mmmaxwwwell/foster-card-generator/issues) and let us know!
 
 ---
 
