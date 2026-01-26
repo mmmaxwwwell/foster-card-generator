@@ -344,7 +344,7 @@ async function loadAnimals() {
         animals = db.getAllAnimals();
 
         if (animals.length === 0) {
-            content.innerHTML = '<div class="loading">No animals found. Run the migration first.</div>';
+            content.innerHTML = '<div class="loading">No animals found. Create one to get started.</div>';
             subtitle.textContent = 'No animals in database';
             return;
         }
