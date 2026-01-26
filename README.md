@@ -33,6 +33,7 @@ A Windows and Linux desktop application that helps animal rescue organizations c
 - Windows 10 or later (64-bit)
 - 200 MB available disk space
 - Internet connection (for web scraping features)
+- **Google Chrome or Microsoft Edge** (recommended) - Used for web scraping. If not installed, the app will download a bundled browser (~200MB) on first use
 
 ---
 
@@ -41,6 +42,18 @@ A Windows and Linux desktop application that helps animal rescue organizations c
 When you first launch the application, it will automatically set up the database with two default rescue organizations:
 - **Paws Rescue League** (Wagtopia)
 - **Brass City Rescue** (Adoptapet)
+
+### Setting Up Rescue Logos
+
+Each rescue organization needs a logo to display on the generated cards. **Brass City Rescue** requires manual logo setup due to website restrictions:
+
+1. Visit the [Brass City Rescue website](https://www.brasscityrescue.org/) and download their logo
+2. In the application, go to **Manage Rescues** from the menu
+3. Select **Brass City Rescue** from the list
+4. Click **Upload Logo** and select the downloaded logo file
+5. Click **Save**
+
+Without a logo, cards for Brass City Rescue animals will display a placeholder image.
 
 ### Adding Animals
 

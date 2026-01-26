@@ -345,7 +345,7 @@ ipcMain.handle('print-image', async (event, filePath, options = {}) => {
     console.log('[Main] Printing image:', filePath);
     console.log('[Main] Print options:', options);
 
-    // On Windows, use SumatraPDF for silent printing
+    // On Windows, use PowerShell with .NET System.Drawing.Printing APIs
     if (process.platform === 'win32' && printWindows) {
         try {
             // Build calibration object from profile calibration values if present
@@ -387,7 +387,7 @@ ipcMain.handle('print-image', async (event, filePath, options = {}) => {
             });
             return result;
         } catch (err) {
-            console.error('[Main] Error printing with SumatraPDF:', err);
+            console.error('[Main] Error printing with PowerShell:', err);
             return { success: false, error: err.message };
         }
     }
