@@ -1476,7 +1476,12 @@ function EditAttributesModal({ isOpen, onClose, animalId, animalName, onSave }) 
         try {
             // Filter out empty strings and save
             const cleanAttrs = attributes.filter(a => a.trim());
-            db.updateAnimalAttributes(animalId, cleanAttrs);
+            console.log(`[handleSave] Saving attributes for animal ID ${animalId}:`, cleanAttrs);
+            const result = db.updateAnimalAttributes(animalId, cleanAttrs);
+            console.log(`[handleSave] Save result:`, result);
+            // Verify it was saved by reading it back
+            const verification = db.getAnimalAttributes(animalId);
+            console.log(`[handleSave] Verification read-back:`, verification);
             showToast('Attributes saved successfully!');
             onSave && onSave();
             onClose();
@@ -2128,7 +2133,7 @@ function PrintSettingsModal({ isOpen, onClose, filePath, onPrintComplete, templa
                     <div class="print-preview-container">
                         <img
                             class="print-preview-image"
-                            src=${filePath ? `file:///${filePath.replace(/\\/g, '/')}` : ''}
+                            src=${filePath ? `file:///${filePath.replace(/\\/g, '/')}?t=${Date.now()}` : ''}
                             alt="Print preview"
                         />
                     </div>
@@ -4055,7 +4060,9 @@ function App() {
 
         // Get stored attributes, or build from animal data as fallback
         let traits = db.getAnimalAttributes(animal.id);
+        console.log(`[printFlyer] Animal ID: ${animal.id}, Name: ${animal.name}, Traits from DB:`, traits);
         if (!traits || traits.length === 0) {
+            console.log(`[printFlyer] No traits found for ${animal.name}, using fallback`);
             // Fallback: build traits list from animal data for the flyer template
             traits = [];
             if (animal.breed) traits.push(animal.breed);
