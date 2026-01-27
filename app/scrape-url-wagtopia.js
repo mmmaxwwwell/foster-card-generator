@@ -42,7 +42,8 @@ async function scrapeAnimalPage(url) {
                 dogs: '?',
                 cats: '?',
                 imageUrl: '',
-                bio: ''
+                bio: '',
+                photoUrls: []
             };
 
             // Helper function to get table cell value by header text
@@ -226,6 +227,21 @@ async function scrapeAnimalPage(url) {
                 result.breed = 'Mixed Breed';
             }
 
+            // Extract all photo URLs from thumbnail divs (excluding video thumbnails)
+            // Wagtopia uses divs with class "thumbnail" and data-src attribute for photo URLs
+            const thumbnails = document.querySelectorAll('.thumbnail:not(.video)');
+            const seenUrls = new Set();
+            for (const thumb of thumbnails) {
+                const dataSrc = thumb.getAttribute('data-src');
+                if (dataSrc && dataSrc.startsWith('http') && !seenUrls.has(dataSrc)) {
+                    // Only include image URLs from petstablished S3 bucket (not YouTube thumbnails)
+                    if (dataSrc.includes('petstablished') || dataSrc.includes('s3.')) {
+                        seenUrls.add(dataSrc);
+                        result.photoUrls.push(dataSrc);
+                    }
+                }
+            }
+
             // Try to find the main image
             // Look for the main pet photo (not thumbnails in carousel)
             const galleryImage = document.querySelector('.pet-photo[data-src]:not(.thumbnail)');
@@ -233,6 +249,10 @@ async function scrapeAnimalPage(url) {
                 const dataSrc = galleryImage.getAttribute('data-src');
                 if (dataSrc && dataSrc.startsWith('http')) {
                     result.imageUrl = dataSrc;
+                    // Add to photoUrls if not already there
+                    if (!seenUrls.has(dataSrc) && (dataSrc.includes('petstablished') || dataSrc.includes('s3.'))) {
+                        result.photoUrls.unshift(dataSrc);
+                    }
                 }
             }
 
@@ -258,6 +278,11 @@ async function scrapeAnimalPage(url) {
                     });
                     result.imageUrl = validImages[0].src;
                 }
+            }
+
+            // If we still have no imageUrl but have photoUrls, use the first one
+            if (!result.imageUrl && result.photoUrls.length > 0) {
+                result.imageUrl = result.photoUrls[0];
             }
 
             // Extract bio from pet-description section
@@ -346,7 +371,8 @@ async function scrapeAnimalPage(url) {
             ...data,
             imagePath: imagePath,
             slug: url,
-            attributes
+            attributes,
+            photoUrls: data.photoUrls || []
         };
 
     } catch (error) {

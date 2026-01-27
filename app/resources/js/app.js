@@ -364,7 +364,7 @@ function Modal({ isOpen, onClose, title, children, footer, width = '600px' }) {
 // ============================================================
 // Image Upload Component
 // ============================================================
-function ImageUpload({ imageUrl, onImageChange, placeholder = '🐕', onAIEdit }) {
+function ImageUpload({ imageUrl, onImageChange, placeholder = '🐕', onAIEdit, onSelectFromWebsite, hasWebsitePhotos }) {
     const inputRef = useRef(null);
 
     const handleUploadClick = (e) => {
@@ -376,6 +376,13 @@ function ImageUpload({ imageUrl, onImageChange, placeholder = '🐕', onAIEdit }
         e.stopPropagation();
         if (onAIEdit && imageUrl) {
             onAIEdit();
+        }
+    };
+
+    const handleSelectFromWebsiteClick = (e) => {
+        e.stopPropagation();
+        if (onSelectFromWebsite) {
+            onSelectFromWebsite();
         }
     };
 
@@ -413,6 +420,12 @@ function ImageUpload({ imageUrl, onImageChange, placeholder = '🐕', onAIEdit }
                         <button class="image-overlay-btn" onClick=${handleAIEditClick}>
                             <span>🪄</span>
                             Edit with AI
+                        </button>
+                    `}
+                    ${hasWebsitePhotos && onSelectFromWebsite && html`
+                        <button class="image-overlay-btn" onClick=${handleSelectFromWebsiteClick}>
+                            <span>🌐</span>
+                            Select from Website
                         </button>
                     `}
                 </div>
@@ -597,6 +610,102 @@ async function convertToPng(blob) {
 }
 
 // ============================================================
+// Photo Picker Modal
+// ============================================================
+function PhotoPickerModal({ isOpen, onClose, photoUrls, onSelect }) {
+    const [loading, setLoading] = useState({});
+    const [selected, setSelected] = useState(null);
+    const showToast = useToast();
+
+    useEffect(() => {
+        if (!isOpen) {
+            setSelected(null);
+            setLoading({});
+        }
+    }, [isOpen]);
+
+    const handleSelect = async () => {
+        if (!selected) return;
+
+        setLoading(prev => ({ ...prev, [selected]: true }));
+        try {
+            // Fetch the image and convert to data URL
+            const response = await fetch(selected);
+            if (!response.ok) throw new Error('Failed to fetch image');
+
+            const blob = await response.blob();
+            const arrayBuffer = await blob.arrayBuffer();
+            const uint8Array = new Uint8Array(arrayBuffer);
+
+            // Convert to hex string
+            let hex = '';
+            for (let i = 0; i < uint8Array.length; i++) {
+                hex += uint8Array[i].toString(16).padStart(2, '0');
+            }
+
+            // Convert to base64 for data URL
+            let binary = '';
+            for (let i = 0; i < uint8Array.length; i++) {
+                binary += String.fromCharCode(uint8Array[i]);
+            }
+            const base64 = btoa(binary);
+            const mime = blob.type || 'image/jpeg';
+
+            onSelect({
+                hex,
+                mime,
+                path: selected,
+                dataUrl: `data:${mime};base64,${base64}`
+            });
+            onClose();
+        } catch (err) {
+            showToast(`Error loading image: ${err.message}`, 'error');
+        } finally {
+            setLoading(prev => ({ ...prev, [selected]: false }));
+        }
+    };
+
+    const footer = html`
+        <button class="btn btn-secondary" onClick=${onClose}>Cancel</button>
+        <button class="btn btn-primary" onClick=${handleSelect} disabled=${!selected || loading[selected]}>
+            ${loading[selected] ? 'Loading...' : 'Use Selected Photo'}
+        </button>
+    `;
+
+    if (!photoUrls || photoUrls.length === 0) {
+        return html`
+            <${Modal} isOpen=${isOpen} onClose=${onClose} title="Select Photo from Website" footer=${footer}>
+                <p style="text-align: center; color: #666; padding: 20px;">
+                    No additional photos available from the adoption website.
+                </p>
+            <//>
+        `;
+    }
+
+    return html`
+        <${Modal} isOpen=${isOpen} onClose=${onClose} title="Select Photo from Website" footer=${footer} width="700px">
+            <p style="margin-bottom: 15px; color: #666;">
+                Click on a photo to select it, then click "Use Selected Photo" to apply it.
+            </p>
+            <div class="photo-picker-grid">
+                ${photoUrls.map(url => html`
+                    <div
+                        key=${url}
+                        class="photo-picker-item ${selected === url ? 'selected' : ''}"
+                        onClick=${() => setSelected(url)}
+                    >
+                        <img src=${url} alt="Pet photo option" loading="lazy" />
+                        ${selected === url && html`
+                            <div class="photo-picker-checkmark">✓</div>
+                        `}
+                    </div>
+                `)}
+            </div>
+        <//>
+    `;
+}
+
+// ============================================================
 // Form Components
 // ============================================================
 function FormGroup({ label, children, id }) {
@@ -702,8 +811,9 @@ function AnimalCard({ animal, rescue, onEdit, onPrintFront, onPrintBack, onPrint
 // ============================================================
 // Animal Form Component (shared between Create and Edit)
 // ============================================================
-function AnimalForm({ animal, rescues, imageData, onImageChange, formRef, onAIEdit, includeBio = true }) {
+function AnimalForm({ animal, rescues, imageData, onImageChange, formRef, onAIEdit, onSelectFromWebsite, photoUrls, includeBio = true }) {
     const imageUrl = imageData?.dataUrl || animal?.imageDataUrl || null;
+    const hasWebsitePhotos = photoUrls && photoUrls.length > 0;
 
     return html`
         <${ImageUpload}
@@ -711,6 +821,8 @@ function AnimalForm({ animal, rescues, imageData, onImageChange, formRef, onAIEd
             onImageChange=${onImageChange}
             placeholder="🐕"
             onAIEdit=${onAIEdit}
+            onSelectFromWebsite=${onSelectFromWebsite}
+            hasWebsitePhotos=${hasWebsitePhotos}
         />
         <form ref=${formRef}>
             <${FormRow}>
@@ -974,16 +1086,28 @@ function EditAnimalModal({ isOpen, onClose, animal, rescues, onSubmit, onDelete 
     const [imageData, setImageData] = useState(null);
     const [showAttributesModal, setShowAttributesModal] = useState(false);
     const [showAIEditModal, setShowAIEditModal] = useState(false);
+    const [showPhotoPickerModal, setShowPhotoPickerModal] = useState(false);
     const [rescraping, setRescraping] = useState(false);
+    const [photoUrls, setPhotoUrls] = useState([]);
     const formRef = useRef(null);
     const showToast = useToast();
+
+    // Load photo URLs when modal opens
+    useEffect(() => {
+        if (isOpen && animal?.id) {
+            const urls = db.getAnimalPhotoUrls(animal.id);
+            setPhotoUrls(urls);
+        }
+    }, [isOpen, animal?.id]);
 
     useEffect(() => {
         if (!isOpen) {
             setImageData(null);
             setShowAttributesModal(false);
             setShowAIEditModal(false);
+            setShowPhotoPickerModal(false);
             setRescraping(false);
+            setPhotoUrls([]);
         }
     }, [isOpen]);
 
@@ -1055,7 +1179,9 @@ function EditAnimalModal({ isOpen, onClose, animal, rescues, onSubmit, onDelete 
             form.kids.value = scrapedData.kids || '?';
             form.dogs.value = scrapedData.dogs || '?';
             form.cats.value = scrapedData.cats || '?';
-            form.bio.value = scrapedData.bio || '';
+            if (bioRef.current) {
+                bioRef.current.value = scrapedData.bio || '';
+            }
 
             // Update image if available
             if (scrapedData.imageUrl) {
@@ -1083,6 +1209,12 @@ function EditAnimalModal({ isOpen, onClose, animal, rescues, onSubmit, onDelete 
             // Update attributes if present
             if (scrapedData.attributes && scrapedData.attributes.length > 0) {
                 db.updateAnimalAttributes(animal.id, scrapedData.attributes);
+            }
+
+            // Update photo URLs if present
+            if (scrapedData.photoUrls && scrapedData.photoUrls.length > 0) {
+                db.updateAnimalPhotoUrls(animal.id, scrapedData.photoUrls);
+                setPhotoUrls(scrapedData.photoUrls);
             }
 
             showToast('Data refreshed from adoption page!');
@@ -1147,6 +1279,8 @@ function EditAnimalModal({ isOpen, onClose, animal, rescues, onSubmit, onDelete 
                         onImageChange=${setImageData}
                         formRef=${formRef}
                         onAIEdit=${() => setShowAIEditModal(true)}
+                        onSelectFromWebsite=${() => setShowPhotoPickerModal(true)}
+                        photoUrls=${photoUrls}
                         includeBio=${false}
                     />
                 </div>
@@ -1190,6 +1324,12 @@ function EditAnimalModal({ isOpen, onClose, animal, rescues, onSubmit, onDelete 
             imageUrl=${getCurrentImageUrl()}
             onSave=${handleAIEditSave}
         />
+        <${PhotoPickerModal}
+            isOpen=${showPhotoPickerModal}
+            onClose=${() => setShowPhotoPickerModal(false)}
+            photoUrls=${photoUrls}
+            onSelect=${setImageData}
+        />
     `;
 }
 
@@ -1219,7 +1359,22 @@ function EditAttributesModal({ isOpen, onClose, animalId, animalName, onSave }) 
 
         setGenerating(true);
         try {
-            const prompt = `Given the following bio for this adoptable pet, I want you to return 16 positive, eloquent adjectives like Loyal, Playful, Cuddly, Loving, High Energy, etc about the animal. Each trait should start with an uppercase letter. Only respond with a newline separated list of the 16 words.\n\nBio:\n${animal.bio}`;
+            const prompt = `Given the following bio for this adoptable pet, return exactly 16 traits as a newline-separated list. Each trait should start with an uppercase letter.
+
+            First, fill slots with positive, eloquent adjectives that describe the animal's personality based on the bio (e.g., Loyal, Playful, Cuddly, Loving, High Energy).
+
+            Then, always end with these 7 factual attributes:
+            - Housebroken (or "Not housebroken" if not mentioned)
+            - Good with kids/cats/dogs (list whichever apply, or don't include if not mentioned)
+            - Spayed/Neutered if mentioned, otherwise omit this field
+            - Medically UTD
+            - Microchipped
+            - Approx XXlbs (use weight from bio, or "Weight unknown" if not mentioned)
+            - Size in format "Medium sized dog" or "Small sized cat" (use size and animal type from bio)
+
+            The first 9 slots should be personality adjectives, and the last 7 slots should be the factual attributes listed above. do not stray from the verbiage supplied.
+
+            Only respond with the newline-separated list of 16 traits.\n\nBio:\n${animal.bio}`;
 
             const response = await fetch('https://api.openai.com/v1/chat/completions', {
                 method: 'POST',
@@ -1508,7 +1663,8 @@ function SelectFromSiteModal({ isOpen, onClose, selectedRescue, onImportComplete
                     cats: scrapedData.cats,
                     bio: scrapedData.bio || '',
                     rescue_id: rescue?.id || 1,
-                    attributes: scrapedData.attributes || []
+                    attributes: scrapedData.attributes || [],
+                    photoUrls: scrapedData.photoUrls || []
                 };
 
                 db.createAnimal(animalData, imageData ? { hex: imageData.hex, mime: imageData.mime, path: imageData.path } : null);
@@ -1642,97 +1798,6 @@ function DeleteMultipleModal({ isOpen, onClose, animals, onDeleteComplete }) {
 
     return html`
         <${Modal} isOpen=${isOpen} onClose=${onClose} title="Delete Multiple Animals" footer=${footer}>
-            <div class="select-all-container">
-                <label>
-                    <input
-                        type="checkbox"
-                        checked=${selectedIds.size === animals.length && animals.length > 0}
-                        onChange=${toggleSelectAll}
-                    />
-                    Select All
-                </label>
-            </div>
-            <div class="delete-animal-grid">
-                ${animals.map(animal => html`
-                    <div
-                        key=${animal.id}
-                        class="delete-animal-item ${selectedIds.has(animal.id) ? 'selected' : ''}"
-                        onClick=${() => toggleSelection(animal.id)}
-                    >
-                        <input
-                            type="checkbox"
-                            checked=${selectedIds.has(animal.id)}
-                            onClick=${(e) => e.stopPropagation()}
-                            onChange=${() => toggleSelection(animal.id)}
-                        />
-                        ${animal.imageDataUrl
-                            ? html`<img class="delete-animal-thumbnail" src=${animal.imageDataUrl} alt=${animal.name} />`
-                            : html`<div class="delete-animal-no-image">🐕</div>`
-                        }
-                        <div class="delete-animal-name">${animal.name}</div>
-                    </div>
-                `)}
-            </div>
-        <//>
-    `;
-}
-
-// ============================================================
-// Print Multiple Modal
-// ============================================================
-function PrintMultipleModal({ isOpen, onClose, animals, onPrintSelected }) {
-    const [selectedIds, setSelectedIds] = useState(new Set());
-    const showToast = useToast();
-
-    useEffect(() => {
-        if (!isOpen) setSelectedIds(new Set());
-    }, [isOpen]);
-
-    const toggleSelection = (id) => {
-        setSelectedIds(prev => {
-            const next = new Set(prev);
-            if (next.has(id)) next.delete(id);
-            else next.add(id);
-            return next;
-        });
-    };
-
-    const toggleSelectAll = () => {
-        if (selectedIds.size === animals.length) {
-            setSelectedIds(new Set());
-        } else {
-            setSelectedIds(new Set(animals.map(a => a.id)));
-        }
-    };
-
-    const handlePrint = () => {
-        if (selectedIds.size === 0) {
-            showToast('Please select at least one animal', 'error');
-            return;
-        }
-
-        const count = selectedIds.size;
-        const names = animals.filter(a => selectedIds.has(a.id)).map(a => a.name).slice(0, 3).join(', ');
-        const displayNames = count > 3 ? `${names} and ${count - 3} more` : names;
-
-        if (!confirm(`Generate cards for ${count} animal${count > 1 ? 's' : ''}?\n\n${displayNames}\n\nCards will be added to the print queue.`)) {
-            return;
-        }
-
-        onPrintSelected(Array.from(selectedIds));
-        showToast(`Added ${count} animal${count > 1 ? 's' : ''} to generation queue`, 'success');
-        onClose();
-    };
-
-    const footer = html`
-        <button class="btn btn-secondary" onClick=${onClose}>Cancel</button>
-        <button class="btn btn-primary" onClick=${handlePrint} disabled=${selectedIds.size === 0}>
-            Print Selected (${selectedIds.size})
-        </button>
-    `;
-
-    return html`
-        <${Modal} isOpen=${isOpen} onClose=${onClose} title="Print Multiple Animals" footer=${footer}>
             <div class="select-all-container">
                 <label>
                     <input
@@ -3735,7 +3800,6 @@ function Header({ subtitle }) {
 function ControlBar({
     onCreateClick,
     onRefreshClick,
-    onPrintMultipleClick,
     onDeleteMultipleClick,
     onSettingsClick
 }) {
@@ -3743,7 +3807,6 @@ function ControlBar({
         <div class="controls">
             <button onClick=${onCreateClick}>Create Animal</button>
             <button onClick=${onRefreshClick}>Refresh</button>
-            <button onClick=${onPrintMultipleClick}>Print Multiple</button>
             <button class="btn-danger-outline" onClick=${onDeleteMultipleClick}>Delete Multiple</button>
             <button class="btn-settings" onClick=${onSettingsClick}>Settings</button>
         </div>
@@ -3800,7 +3863,6 @@ function App() {
     const [showManualEntry, setShowManualEntry] = useState(false);
     const [showSelectFromSite, setShowSelectFromSite] = useState(false);
     const [showDeleteMultiple, setShowDeleteMultiple] = useState(false);
-    const [showPrintMultiple, setShowPrintMultiple] = useState(false);
     const [showSettings, setShowSettings] = useState(false);
     const [editingTemplateFullscreen, setEditingTemplateFullscreen] = useState(null);
     const [showPrintSettings, setShowPrintSettings] = useState(false);
@@ -4262,12 +4324,6 @@ function App() {
         }
     };
 
-    const handlePrintMultiple = (animalIds) => {
-        for (const id of animalIds) {
-            setCardQueue(prev => [...prev, { animalId: id }]);
-        }
-    };
-
     if (error) {
         return html`
             <div class="container">
@@ -4307,7 +4363,6 @@ onClose=${() => {
             <${ControlBar}
                 onCreateClick=${() => setShowCreateOptions(true)}
                 onRefreshClick=${loadAnimals}
-                onPrintMultipleClick=${() => setShowPrintMultiple(true)}
                 onDeleteMultipleClick=${() => setShowDeleteMultiple(true)}
                 onSettingsClick=${() => setShowSettings(true)}
             />
@@ -4380,13 +4435,6 @@ onClose=${() => {
                 onClose=${() => setShowDeleteMultiple(false)}
                 animals=${animals}
                 onDeleteComplete=${loadAnimals}
-            />
-
-            <${PrintMultipleModal}
-                isOpen=${showPrintMultiple}
-                onClose=${() => setShowPrintMultiple(false)}
-                animals=${animals}
-                onPrintSelected=${handlePrintMultiple}
             />
 
             <${SettingsModal}

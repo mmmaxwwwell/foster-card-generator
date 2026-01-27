@@ -271,23 +271,23 @@
         }
 
         .btn-print-front {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%);
             color: white;
         }
 
         .btn-print-front:hover {
             transform: translateY(-1px);
-            box-shadow: 0 2px 8px rgba(102, 126, 234, 0.4);
+            box-shadow: 0 2px 8px rgba(76, 175, 80, 0.4);
         }
 
         .btn-print-back {
-            background: #f0f0f0;
-            color: #333;
+            background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%);
+            color: white;
         }
 
         .btn-print-back:hover {
-            background: #e0e0e0;
             transform: translateY(-1px);
+            box-shadow: 0 2px 8px rgba(76, 175, 80, 0.4);
         }
 
         .card-actions-section {
@@ -340,7 +340,7 @@
         }
 
         .btn-print-template {
-            background: linear-gradient(135deg, #ff9800 0%, #f57c00 100%);
+            background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%);
             color: white;
             width: 100%;
             white-space: nowrap;
@@ -350,7 +350,7 @@
 
         .btn-print-template:hover {
             transform: translateY(-1px);
-            box-shadow: 0 2px 8px rgba(255, 152, 0, 0.4);
+            box-shadow: 0 2px 8px rgba(76, 175, 80, 0.4);
         }
 
         .loading {
@@ -540,6 +540,59 @@
             object-fit: contain;
             border-radius: 8px;
             box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+
+        /* Photo Picker Modal */
+        .photo-picker-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+            gap: 12px;
+            max-height: 400px;
+            overflow-y: auto;
+            padding: 5px;
+        }
+
+        .photo-picker-item {
+            position: relative;
+            aspect-ratio: 1;
+            border-radius: 8px;
+            overflow: hidden;
+            cursor: pointer;
+            border: 3px solid transparent;
+            transition: border-color 0.2s, transform 0.2s;
+            background: #f0f0f0;
+        }
+
+        .photo-picker-item:hover {
+            transform: scale(1.02);
+            border-color: #667eea;
+        }
+
+        .photo-picker-item.selected {
+            border-color: #667eea;
+            box-shadow: 0 0 0 2px rgba(102, 126, 234, 0.3);
+        }
+
+        .photo-picker-item img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+
+        .photo-picker-checkmark {
+            position: absolute;
+            top: 8px;
+            right: 8px;
+            width: 24px;
+            height: 24px;
+            background: #667eea;
+            color: white;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            font-size: 14px;
         }
 
         .form-group {

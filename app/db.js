@@ -305,7 +305,7 @@ function getAllAnimals() {
     return queryAll(`
         SELECT id, name, slug, size, shots, housetrained, breed,
                age_long, age_short, gender, kids, dogs, cats,
-               portrait_path, portrait_mime, rescue_id, attributes, bio
+               portrait_path, portrait_mime, rescue_id, attributes, bio, photo_urls
         FROM animals
         ORDER BY name
     `);
@@ -320,7 +320,7 @@ function getAnimalById(id) {
     return queryOnePrepared(`
         SELECT id, name, slug, size, shots, housetrained, breed,
                age_long, age_short, gender, kids, dogs, cats,
-               portrait_path, portrait_mime, rescue_id, attributes, bio
+               portrait_path, portrait_mime, rescue_id, attributes, bio, photo_urls
         FROM animals
         WHERE id = ?
     `, [id]);
@@ -360,6 +360,7 @@ function createAnimal(animal, imageData = null) {
 
     const rescueId = animal.rescue_id || 1;
     const attributesJson = JSON.stringify(Array.isArray(animal.attributes) ? animal.attributes.slice(0, 16) : []);
+    const photoUrlsJson = JSON.stringify(Array.isArray(animal.photoUrls) ? animal.photoUrls : []);
 
     if (imageData) {
         // Convert hex string to Uint8Array for the BLOB
@@ -369,8 +370,8 @@ function createAnimal(animal, imageData = null) {
             INSERT INTO animals (
                 name, breed, slug, age_long, age_short, size, gender,
                 shots, housetrained, kids, dogs, cats,
-                portrait_path, portrait_mime, portrait_data, rescue_id, attributes, bio
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                portrait_path, portrait_mime, portrait_data, rescue_id, attributes, bio, photo_urls
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `, [
             animal.name,
             animal.breed,
@@ -389,14 +390,15 @@ function createAnimal(animal, imageData = null) {
             imageBuffer,
             rescueId,
             attributesJson,
-            animal.bio || null
+            animal.bio || null,
+            photoUrlsJson
         ]);
     } else {
         return runPrepared(`
             INSERT INTO animals (
                 name, breed, slug, age_long, age_short, size, gender,
-                shots, housetrained, kids, dogs, cats, rescue_id, attributes, bio
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                shots, housetrained, kids, dogs, cats, rescue_id, attributes, bio, photo_urls
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `, [
             animal.name,
             animal.breed,
@@ -412,7 +414,8 @@ function createAnimal(animal, imageData = null) {
             animal.cats,
             rescueId,
             attributesJson,
-            animal.bio || null
+            animal.bio || null,
+            photoUrlsJson
         ]);
     }
 }
@@ -527,6 +530,36 @@ function updateAnimalAttributes(id, attributes) {
         .filter(a => typeof a === 'string' && a.trim())
         .slice(0, 16);
     return runPrepared('UPDATE animals SET attributes = ? WHERE id = ?', [JSON.stringify(cleanAttrs), id]);
+}
+
+/**
+ * Get photo URLs for an animal
+ * @param {number} id - Animal ID
+ * @returns {Array} - Array of photo URL strings
+ */
+function getAnimalPhotoUrls(id) {
+    if (!db) throw new Error('Database not initialized');
+    const row = queryOnePrepared('SELECT photo_urls FROM animals WHERE id = ?', [id]);
+    if (!row || !row.photo_urls) return [];
+    try {
+        const urls = JSON.parse(row.photo_urls);
+        return Array.isArray(urls) ? urls : [];
+    } catch {
+        return [];
+    }
+}
+
+/**
+ * Update photo URLs for an animal
+ * @param {number} id - Animal ID
+ * @param {Array} photoUrls - Array of photo URL strings
+ * @returns {Object} - Result with changes count
+ */
+function updateAnimalPhotoUrls(id, photoUrls) {
+    if (!db) throw new Error('Database not initialized');
+    const cleanUrls = (Array.isArray(photoUrls) ? photoUrls : [])
+        .filter(u => typeof u === 'string' && u.trim());
+    return runPrepared('UPDATE animals SET photo_urls = ? WHERE id = ?', [JSON.stringify(cleanUrls), id]);
 }
 
 /**
@@ -1126,6 +1159,8 @@ module.exports = {
     deleteAnimals,
     getAnimalAttributes,
     updateAnimalAttributes,
+    getAnimalPhotoUrls,
+    updateAnimalPhotoUrls,
 
     // Rescue operations
     getAllRescues,

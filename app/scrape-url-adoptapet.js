@@ -78,7 +78,8 @@ async function scrapeAnimalPage(url) {
                 dogs: '0',
                 cats: '0',
                 imageUrl: '',
-                bio: ''
+                bio: '',
+                photoUrls: []
             };
 
             // Try to find the viewData JSON object in the page
@@ -197,11 +198,25 @@ async function scrapeAnimalPage(url) {
                                 }
                             }
 
+                            // Extract all photo URLs from petPhotos array
+                            // Format: https://media.adoptapet.com/image/upload/c_fit,h_800,dpr_2/f_auto,q_auto/{sourcePhotoId}
+                            if (viewData.petPhotos && Array.isArray(viewData.petPhotos)) {
+                                for (const photo of viewData.petPhotos) {
+                                    if (photo.sourcePhotoId) {
+                                        const photoUrl = `https://media.adoptapet.com/image/upload/c_fit,h_800,dpr_2/f_auto,q_auto/${photo.sourcePhotoId}`;
+                                        result.photoUrls.push(photoUrl);
+                                    }
+                                }
+                            }
+
                             // Extract image URL from petSocialShareData.sharedPhotoUrl
                             if (viewData.petSocialShareData && viewData.petSocialShareData.sharedPhotoUrl) {
                                 result.imageUrl = viewData.petSocialShareData.sharedPhotoUrl;
                             } else if (viewData.petThumbnailUrl) {
                                 result.imageUrl = viewData.petThumbnailUrl;
+                            } else if (result.photoUrls.length > 0) {
+                                // Use first photo from photoUrls if no other image found
+                                result.imageUrl = result.photoUrls[0];
                             }
                         } catch (e) {
                             console.error('Error parsing viewData:', e);
@@ -308,7 +323,8 @@ async function scrapeAnimalPage(url) {
             ...data,
             imagePath: imagePath,
             slug: cleanUrl,
-            attributes
+            attributes,
+            photoUrls: data.photoUrls || []
         };
 
     } catch (error) {
