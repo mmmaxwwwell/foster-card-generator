@@ -65,14 +65,11 @@
           ]
         }
       ],
-      "icon": "src/icon_small.ico"
+      "icon": "app/resources/icons/appIcon.png"
     },
     "nsis": {
       "oneClick": false,
-      "allowToChangeInstallationDirectory": true,
-      "installerIcon": "src/icon_small.ico",
-      "uninstallerIcon": "src/icon_small.ico",
-      "installerSidebar": "src/logo.png"
+      "allowToChangeInstallationDirectory": true
     },
     "portable": {
       "artifactName": "${productName}-${version}-portable.exe"
