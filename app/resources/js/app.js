@@ -1869,26 +1869,31 @@ function PrintSettingsModal({ isOpen, onClose, filePath, onPrintComplete, templa
         }
     }, [isOpen, templateConfig]);
 
-    // Load printers on open
-    useEffect(() => {
-        if (!isOpen) return;
+    // Function to load printers (used on open and refresh)
+    const loadPrinters = async (selectDefault = true) => {
         setLoading(true);
-        (async () => {
-            try {
-                const result = await ipcRenderer.invoke('get-printers');
-                if (result.success) {
-                    setPrinters(result.printers);
+        try {
+            const result = await ipcRenderer.invoke('get-printers');
+            if (result.success) {
+                setPrinters(result.printers);
+                if (selectDefault) {
                     const defaultPrinter = result.printers.find(p => p.isDefault);
                     if (defaultPrinter) {
                         setSelectedPrinter(defaultPrinter.name);
                     }
                 }
-            } catch (err) {
-                showToast(`Error loading printers: ${err.message}`, 'error');
-            } finally {
-                setLoading(false);
             }
-        })();
+        } catch (err) {
+            showToast(`Error loading printers: ${err.message}`, 'error');
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    // Load printers on open
+    useEffect(() => {
+        if (!isOpen) return;
+        loadPrinters(true);
     }, [isOpen]);
 
     // Load profiles when printer changes
@@ -2005,7 +2010,7 @@ function PrintSettingsModal({ isOpen, onClose, filePath, onPrintComplete, templa
                         <button
                             type="button"
                             class="btn btn-icon"
-                            onClick=${() => setLoading(true)}
+                            onClick=${() => loadPrinters(false)}
                             title="Refresh printers"
                         >
                             🔄

@@ -431,6 +431,35 @@ body {
     font-size: 1.125rem;
 }
 
+/* Support Section */
+.support {
+    padding: 80px 24px;
+    background: var(--white);
+    text-align: center;
+}
+
+.support h2 {
+    font-size: 2rem;
+    margin-bottom: 16px;
+}
+
+.support p {
+    color: var(--text-light);
+    max-width: 600px;
+    margin: 0 auto;
+    font-size: 1.125rem;
+}
+
+.support a {
+    color: var(--gradient-start);
+    text-decoration: none;
+    font-weight: 500;
+}
+
+.support a:hover {
+    text-decoration: underline;
+}
+
 /* CTA Section */
 .cta {
     padding: 100px 24px;
