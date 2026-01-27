@@ -47,6 +47,8 @@ Two independent implementations for different sites:
 - **Wagtopia**: `scrape-url-wagtopia.js`, `scrape-list-wagtopia.js` - Puppeteer-based, JS-heavy pages
 - **Adoptapet**: `scrape-url-adoptapet.js`, `scrape-list-adoptapet.js` - Cheerio-based, table HTML parsing
 
+Both scrapers extract all available photo URLs from adoption profiles, stored as JSON array in `photo_urls` column.
+
 **Why two scrapers?** Sites have completely different DOM structures.
 
 ### Card Generation (`app/generate-card-cli.js`)
@@ -62,7 +64,7 @@ Renders HTML templates via Puppeteer at 360 DPI (deviceScaleFactor = 3.75). Retu
 
 Six tables:
 - `rescues` - Rescue organizations with logos (BLOB storage)
-- `animals` - Animal records with portraits, bio text, and custom attributes (JSON)
+- `animals` - Animal records with portraits, bio text, custom attributes (JSON), and photo URLs (JSON array of all available photos from adoption website)
 - `print_profiles` - Saved printer configurations with calibration data
 - `templates` - Card/flyer templates (HTML + config JSON)
 - `settings` - Key-value storage for app settings (e.g., OpenAI API key)
@@ -219,6 +221,13 @@ Puppeteer checks these paths in order:
 - Natural language prompts: "Make background a sunny park", "Remove the leash"
 - Interactive workflow: generate, review, continue editing, or save
 - Requires OpenAI API key configured in Settings
+
+### Website Photo Selection
+- Scrapers extract all available photos from adoption website profiles
+- Photo URLs stored in `photo_urls` column as JSON array
+- Photo Picker Modal allows users to choose from all available website photos
+- Access via "Select from Website" button on animal portrait hover (when photos available)
+- Selected photo is fetched, converted, and saved as the animal's portrait
 
 ## Known Limitations
 

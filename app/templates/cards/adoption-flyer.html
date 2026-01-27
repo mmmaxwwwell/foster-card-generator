@@ -23,7 +23,7 @@ body {
     height: 11in;
     background-color: #fff;
     margin: 0 auto;
-    padding: 0.3in;
+    padding: 0.25in;
     display: flex;
     flex-direction: column;
 }
@@ -32,13 +32,13 @@ body {
     display: flex;
     justify-content: center;
     align-items: center;
-    gap: 0.3in;
-    margin-bottom: 0.15in;
+    gap: 0.2in;
+    margin-bottom: 0.1in;
 }
 
 .paw-print {
-    width: 0.6in;
-    height: 0.6in;
+    width: 0.8in;
+    height: 0.8in;
     flex-shrink: 0;
 }
 
@@ -48,31 +48,32 @@ body {
 }
 
 .logo {
-    max-height: 0.9in;
-    max-width: 2.5in;
+    max-height: 1.2in;
+    max-width: 4in;
     object-fit: contain;
 }
 
 .title {
-    font-family: Arial, sans-serif;
-    font-size: 0.55in;
-    font-weight: bold;
+    font-family: 'Arial Black', Arial, sans-serif;
+    font-size: 0.48in;
+    font-weight: 900;
     color: #333;
     text-align: center;
     letter-spacing: 1px;
     margin-bottom: 0.1in;
-    line-height: 1.2;
+    line-height: 1.1;
+    white-space: nowrap;
 }
 
-.content-area {
+.main-content {
     display: flex;
     flex: 1;
-    gap: 0.2in;
+    gap: 0.15in;
     min-height: 0;
 }
 
-.photo-section {
-    flex: 1.1;
+.photo-column {
+    flex: 1.2;
     display: flex;
     flex-direction: column;
 }
@@ -81,7 +82,7 @@ body {
     flex: 1;
     position: relative;
     overflow: hidden;
-    border-radius: 8px;
+    border-radius: 6px;
 }
 
 .photo-container img {
@@ -91,98 +92,108 @@ body {
     object-position: center;
 }
 
-.scan-section {
+.traits-column {
+    flex: 0.8;
     display: flex;
     flex-direction: column;
-    align-items: center;
-    margin-top: 0.15in;
-    gap: 0.05in;
-}
-
-.scan-section .scan-text {
-    font-family: Arial, sans-serif;
-    font-size: 0.28in;
-    font-weight: bold;
-    color: #333;
-}
-
-.scan-section .qr-code {
-    width: 1.4in;
-    height: 1.4in;
-}
-
-.traits-section {
-    flex: 0.9;
-    display: flex;
-    flex-direction: column;
-    justify-content: space-between;
+    justify-content: flex-start;
+    padding-top: 0.05in;
 }
 
 .traits-list {
-    font-family: Arial, sans-serif;
-    font-size: 0.2in;
-    line-height: 1.6;
+    font-family: 'Arial Black', Arial, sans-serif;
+    font-size: 0.22in;
+    line-height: 1.45;
     color: #333;
+    font-weight: bold;
 }
 
 .traits-list .trait {
-    margin-bottom: 0.02in;
+    margin-bottom: 0.01in;
 }
 
 .adoptable-badge {
     background-color: #CDDC39;
     color: #333;
-    font-family: Arial, sans-serif;
-    font-size: 0.4in;
-    font-weight: bold;
+    font-family: 'Arial Black', Arial, sans-serif;
+    font-size: 0.42in;
+    font-weight: 900;
     text-align: center;
-    padding: 0.1in 0.2in;
+    padding: 0.08in 0.15in;
     border-radius: 4px;
     margin-top: 0.1in;
+    display: inline-block;
 }
 
-.footer {
+.footer-section {
+    display: flex;
+    margin-top: 0.15in;
+    gap: 0.15in;
+    align-items: stretch;
+}
+
+.cta-column {
+    flex: 1;
     display: flex;
     flex-direction: column;
+    justify-content: center;
     align-items: center;
-    margin-top: 0.15in;
-    gap: 0.1in;
 }
 
+.scan-text {
+    font-family: 'Arial Black', Arial, sans-serif;
+    font-size: 0.38in;
+    font-weight: 900;
+    color: #333;
+    text-align: center;
+    margin-bottom: 0.1in;
+}
 
 .or-visit {
     display: flex;
     align-items: center;
-    gap: 0.15in;
-    margin-top: 0.1in;
+    justify-content: center;
+    gap: 0.12in;
+    margin-top: 0.15in;
 }
 
 .or-visit-text {
-    font-family: Arial, sans-serif;
-    font-size: 0.24in;
-    font-weight: bold;
+    font-family: 'Arial Black', Arial, sans-serif;
+    font-size: 0.32in;
+    font-weight: 900;
     color: #333;
 }
 
-.or-visit .paw-small {
-    width: 0.35in;
-    height: 0.35in;
+.paw-small {
+    width: 0.45in;
+    height: 0.45in;
 }
 
-.or-visit .paw-small svg {
+.paw-small svg {
     width: 100%;
     height: 100%;
 }
 
 .website {
-    font-family: Arial, sans-serif;
-    font-size: 0.28in;
-    font-weight: bold;
+    font-family: 'Arial Black', Arial, sans-serif;
+    font-size: 0.32in;
+    font-weight: 900;
     color: #333;
     text-align: center;
-    margin-top: 0.05in;
+    margin-top: 0.08in;
 }
 
+.qr-column {
+    flex: 0 0 2.5in;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.qr-code {
+    width: 2.4in;
+    height: 2.4in;
+}
 
 /* SVG paw print inline */
 .paw-svg {
@@ -221,21 +232,17 @@ body {
         <!-- Title -->
         <div class="title">HAVE YOU SEEN {{name}}?</div>
 
-        <!-- Main content area -->
-        <div class="content-area">
+        <!-- Main content: Photo + Traits side by side -->
+        <div class="main-content">
             <!-- Photo -->
-            <div class="photo-section">
+            <div class="photo-column">
                 <div class="photo-container">
                     <img src="{{portrait}}" alt="{{name}}">
                 </div>
-                <div class="scan-section">
-                    <div class="scan-text">Scan To Apply</div>
-                    <img src="{{qrcode}}" alt="QR Code" class="qr-code">
-                </div>
             </div>
 
-            <!-- Traits -->
-            <div class="traits-section">
+            <!-- Traits with Adoptable badge at bottom -->
+            <div class="traits-column">
                 <div class="traits-list">
                     {{#if trait1}}<div class="trait">{{trait1}}</div>{{/if}}
                     {{#if trait2}}<div class="trait">{{trait2}}</div>{{/if}}
@@ -258,32 +265,38 @@ body {
             </div>
         </div>
 
-        <!-- Footer -->
-        <div class="footer">
-            <div class="or-visit">
-                <div class="paw-small">
-                    <svg viewBox="0 0 100 100" class="paw-svg">
-                        <ellipse cx="50" cy="65" rx="25" ry="22"/>
-                        <ellipse cx="25" cy="35" rx="12" ry="15"/>
-                        <ellipse cx="50" cy="25" rx="10" ry="13"/>
-                        <ellipse cx="75" cy="35" rx="12" ry="15"/>
-                        <ellipse cx="85" cy="60" rx="8" ry="10"/>
-                        <ellipse cx="15" cy="60" rx="8" ry="10"/>
-                    </svg>
+        <!-- Footer: Scan to Apply / Or Visit on left, QR code on right -->
+        <div class="footer-section">
+            <div class="cta-column">
+                <div class="scan-text">Scan To Apply ---></div>
+                <div class="or-visit">
+                    <div class="paw-small">
+                        <svg viewBox="0 0 100 100" class="paw-svg">
+                            <ellipse cx="50" cy="65" rx="25" ry="22"/>
+                            <ellipse cx="25" cy="35" rx="12" ry="15"/>
+                            <ellipse cx="50" cy="25" rx="10" ry="13"/>
+                            <ellipse cx="75" cy="35" rx="12" ry="15"/>
+                            <ellipse cx="85" cy="60" rx="8" ry="10"/>
+                            <ellipse cx="15" cy="60" rx="8" ry="10"/>
+                        </svg>
+                    </div>
+                    <span class="or-visit-text">Or Visit</span>
+                    <div class="paw-small">
+                        <svg viewBox="0 0 100 100" class="paw-svg">
+                            <ellipse cx="50" cy="65" rx="25" ry="22"/>
+                            <ellipse cx="25" cy="35" rx="12" ry="15"/>
+                            <ellipse cx="50" cy="25" rx="10" ry="13"/>
+                            <ellipse cx="75" cy="35" rx="12" ry="15"/>
+                            <ellipse cx="85" cy="60" rx="8" ry="10"/>
+                            <ellipse cx="15" cy="60" rx="8" ry="10"/>
+                        </svg>
+                    </div>
                 </div>
-                <span class="or-visit-text">Or Visit</span>
-                <div class="paw-small">
-                    <svg viewBox="0 0 100 100" class="paw-svg">
-                        <ellipse cx="50" cy="65" rx="25" ry="22"/>
-                        <ellipse cx="25" cy="35" rx="12" ry="15"/>
-                        <ellipse cx="50" cy="25" rx="10" ry="13"/>
-                        <ellipse cx="75" cy="35" rx="12" ry="15"/>
-                        <ellipse cx="85" cy="60" rx="8" ry="10"/>
-                        <ellipse cx="15" cy="60" rx="8" ry="10"/>
-                    </svg>
-                </div>
+                <div class="website">{{rescueWebsite}}</div>
             </div>
-            <div class="website">{{rescueWebsite}}</div>
+            <div class="qr-column">
+                <img src="{{qrcode}}" alt="QR Code" class="qr-code">
+            </div>
         </div>
         {{/repeat}}
     </div>

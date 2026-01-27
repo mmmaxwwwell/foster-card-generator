@@ -113,9 +113,6 @@ async function initializeAsync() {
         db = new SQL.Database();
     }
 
-    // Handle existing databases (pre-migration system)
-    markExistingDatabaseAsMigrated(db);
-
     // Run migrations
     const appliedMigrations = runMigrations(db, saveDatabase);
     if (appliedMigrations.length > 0) {
@@ -148,43 +145,6 @@ function initialize() {
     // For sync compatibility, throw if not yet initialized
     // Callers should use initializeAsync() or await initialize()
     throw new Error('Database requires async initialization. Use: await db.initializeAsync()');
-}
-
-/**
- * Mark an existing database as having all migrations applied
- * This is used for databases created before the migration system
- * @param {Object} db - sql.js database instance
- */
-function markExistingDatabaseAsMigrated(db) {
-    const { ensureMigrationsTable, getAvailableMigrations, getAppliedMigrations } = require('./db/migrate.js');
-
-    ensureMigrationsTable(db);
-
-    // Check if tables already exist (pre-migration database)
-    const tablesResult = db.exec(
-        "SELECT name FROM sqlite_master WHERE type='table' AND name IN ('rescues', 'animals', 'print_profiles')"
-    );
-
-    if (tablesResult.length > 0 && tablesResult[0].values.length >= 2) {
-        // Database has existing tables, check if migrations are tracked
-        const applied = getAppliedMigrations(db);
-
-        if (applied.length === 0) {
-            // Mark initial migration as applied since schema already exists
-            const available = getAvailableMigrations();
-            const initialMigration = available.find(m => m.name.includes('initial'));
-
-            if (initialMigration) {
-                console.log('[DB] Marking existing database as migrated');
-                const stmt = db.prepare(
-                    'INSERT INTO schema_migrations (version, name) VALUES (?, ?)'
-                );
-                stmt.bind([initialMigration.version, initialMigration.name]);
-                stmt.step();
-                stmt.free();
-            }
-        }
-    }
 }
 
 /**
