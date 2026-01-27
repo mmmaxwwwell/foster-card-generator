@@ -160,8 +160,9 @@ const result = await ipcRenderer.invoke('action-name', data);
 3. Regenerate node2nix files if package.json changed (see above)
 4. Verify NixOS build: `nix build`
 5. **Review this document for accuracy**
-6. Run `npm run build` for Windows installer
-7. Test on clean Windows install
+6. Run `npm run build:win` for Windows installer (same command used in CI)
+7. Verify build artifacts exist in `dist/` folder
+8. Test on clean Windows install
 
 ## Conventions
 
