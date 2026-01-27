@@ -2,13 +2,16 @@
 
 **[View the website](https://mmmaxwwwell.github.io/foster-card-generator/)**
 
-A Windows and Linux desktop application that helps animal rescue organizations create professional, printable trading card-style promotional materials for foster animals.
+A Windows and Linux desktop application that helps animal rescue organizations create professional, printable business card-style promotional materials and adoption flyers for foster animals.
 
 ## Features
 
 - **Animal Database Management** - Store and organize information about dogs and other animals available for adoption or fostering
 - **Professional Card Generation** - Create high-quality (360 DPI) printable cards with animal photos, details, and QR codes linking to adoption profiles
+- **Adoption Flyers** - Generate full-page 8.5" × 11" adoption flyers with large photos, custom attributes, and QR codes
+- **Flexible Template System** - Built-in templates for business cards and flyers, with support for custom templates
 - **Web Scraping Integration** - Automatically import animal information from Wagtopia and Adoptapet adoption websites
+- **AI-Powered Attributes** - Generate custom personality traits from animal bios using OpenAI (optional)
 - **Advanced Print Management** - Printer profiles, calibration system, and custom paper settings for accurate printing
 - **Multi-Rescue Support** - Manage animals from multiple rescue organizations
 
@@ -187,6 +190,30 @@ Click **Save Profile** to store the calibration data. Future prints will automat
 3. Make your changes
 4. Click **Save**
 
+### Managing Animal Attributes
+
+Animals can have up to 16 custom attributes (personality traits) that appear on adoption flyers:
+
+1. Open an animal for editing
+2. Scroll to the **Attributes** section
+3. Either:
+   - **Manual entry**: Type attributes like "Leash Trained", "Loves Belly Rubs", etc.
+   - **AI generation**: Click **Generate Attributes** to auto-generate from the animal's bio (requires OpenAI API key in Settings)
+4. Click **Save**
+
+### AI Image Editing
+
+Enhance animal photos with AI-powered image editing (requires OpenAI API key):
+
+1. Open an animal for editing
+2. Hover over the animal's photo and click **Edit with AI**
+3. Describe the changes you want in natural language, for example:
+   - "Make the background a sunny park"
+   - "Remove the leash"
+   - "Make it look more professional"
+4. Click **Generate** to create the edited image
+5. Continue editing or click **Save** to apply changes
+
 ### Deleting Animals
 
 1. Click on an animal card to view details
@@ -195,16 +222,17 @@ Click **Save Profile** to store the calibration data. Future prints will automat
 
 ---
 
-## Card Design
+## Output Templates
 
-Each generated card includes:
+The application includes multiple built-in templates for generating promotional materials:
+
+### Business Cards (Avery 8471)
 
 **Front of Card:**
 - Rescue organization logo
-- Rescue organization url
+- Rescue organization URL
 - Large animal portrait photo
-- Animal's name
-- Animal's age
+- Animal's name and age
 - Animal's breed
 
 **Back of Card:**
@@ -212,7 +240,53 @@ Each generated card includes:
 - Vaccination and house-training status
 - QR code linking to the animal's adoption profile
 
-Cards are designed to print on [Avery 8471 Business Card](https://www.amazon.com/Avery-Printable-Business-Printers-Heavyweight/dp/B00006HQU9) templates (10 cards per sheet, US Letter size) at 360 DPI for professional print quality.
+Cards print on [Avery 8471 Business Card](https://www.amazon.com/Avery-Printable-Business-Printers-Heavyweight/dp/B00006HQU9) templates (10 cards per sheet, US Letter size) at 360 DPI.
+
+### Adoption Flyer
+
+Full-page 8.5" × 11" portrait flyer featuring:
+- Rescue organization logo
+- Large animal photo
+- "HAVE YOU SEEN [NAME]?" headline
+- Up to 16 custom attributes/personality traits
+- QR code for adoption profile
+- "ADOPTABLE" badge
+- Organization website
+
+### Managing Templates
+
+Access template settings via **Settings > Card Templates**:
+- View and edit built-in templates
+- Create custom templates using Handlebars syntax
+- Customize page size, orientation, and preprocessing options
+
+See [docs/TEMPLATES.md](docs/TEMPLATES.md) for detailed template documentation.
+
+---
+
+## Settings
+
+Access the Settings modal via the **Settings** button in the toolbar. The settings page provides access to:
+
+### Rescue Organizations
+- Add, edit, and delete rescue organizations
+- Upload organization logos
+- Configure web scraper settings (Wagtopia/Adoptapet)
+
+### Print Profiles
+- Save and load printer configurations
+- Set default profiles per printer
+- Configure calibration settings for accurate card alignment
+
+### Card Templates
+- View and edit output templates
+- Create custom templates
+- Customize page size, orientation, and output settings
+
+### OpenAI API Key
+- Configure your OpenAI API key for AI-powered features
+- Required for: AI attribute generation, AI image editing
+- Get your API key at [platform.openai.com](https://platform.openai.com/api-keys)
 
 ---
 

@@ -77,7 +77,8 @@ async function scrapeAnimalPage(url) {
                 kids: '0',
                 dogs: '0',
                 cats: '0',
-                imageUrl: ''
+                imageUrl: '',
+                bio: ''
             };
 
             // Try to find the viewData JSON object in the page
@@ -234,6 +235,12 @@ async function scrapeAnimalPage(url) {
                 }
             }
 
+            // Extract bio from the "my-story" div
+            const myStoryDiv = document.querySelector('div.my-story');
+            if (myStoryDiv) {
+                result.bio = myStoryDiv.textContent.trim();
+            }
+
             return result;
         });
 
@@ -282,13 +289,26 @@ async function scrapeAnimalPage(url) {
             }
         }
 
+        // Build attributes array from scraped data for the adoption flyer
+        const attributes = [];
+        if (data.breed) attributes.push(data.breed);
+        if (data.age_long) attributes.push(data.age_long);
+        if (data.size) attributes.push(data.size);
+        if (data.gender) attributes.push(data.gender);
+        if (data.shots) attributes.push('Up to date on shots');
+        if (data.housetrained) attributes.push('Housetrained');
+        if (data.kids === '1') attributes.push('Good with kids');
+        if (data.dogs === '1') attributes.push('Good with dogs');
+        if (data.cats === '1') attributes.push('Good with cats');
+
         // Return the scraped data
         // Strip the slug suffix after the pet ID (e.g., -middlebury-connecticut-husky)
         const cleanUrl = url.replace(/\/pet\/(\d+)-.*$/, '/pet/$1');
         return {
             ...data,
             imagePath: imagePath,
-            slug: cleanUrl
+            slug: cleanUrl,
+            attributes
         };
 
     } catch (error) {

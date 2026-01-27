@@ -305,7 +305,7 @@ function getAllAnimals() {
     return queryAll(`
         SELECT id, name, slug, size, shots, housetrained, breed,
                age_long, age_short, gender, kids, dogs, cats,
-               portrait_path, portrait_mime, rescue_id
+               portrait_path, portrait_mime, rescue_id, attributes, bio
         FROM animals
         ORDER BY name
     `);
@@ -320,7 +320,7 @@ function getAnimalById(id) {
     return queryOnePrepared(`
         SELECT id, name, slug, size, shots, housetrained, breed,
                age_long, age_short, gender, kids, dogs, cats,
-               portrait_path, portrait_mime, rescue_id
+               portrait_path, portrait_mime, rescue_id, attributes, bio
         FROM animals
         WHERE id = ?
     `, [id]);
@@ -359,6 +359,7 @@ function createAnimal(animal, imageData = null) {
     if (!db) throw new Error('Database not initialized');
 
     const rescueId = animal.rescue_id || 1;
+    const attributesJson = JSON.stringify(Array.isArray(animal.attributes) ? animal.attributes.slice(0, 16) : []);
 
     if (imageData) {
         // Convert hex string to Uint8Array for the BLOB
@@ -368,8 +369,8 @@ function createAnimal(animal, imageData = null) {
             INSERT INTO animals (
                 name, breed, slug, age_long, age_short, size, gender,
                 shots, housetrained, kids, dogs, cats,
-                portrait_path, portrait_mime, portrait_data, rescue_id
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                portrait_path, portrait_mime, portrait_data, rescue_id, attributes, bio
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `, [
             animal.name,
             animal.breed,
@@ -386,14 +387,16 @@ function createAnimal(animal, imageData = null) {
             imageData.path,
             imageData.mime,
             imageBuffer,
-            rescueId
+            rescueId,
+            attributesJson,
+            animal.bio || null
         ]);
     } else {
         return runPrepared(`
             INSERT INTO animals (
                 name, breed, slug, age_long, age_short, size, gender,
-                shots, housetrained, kids, dogs, cats, rescue_id
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                shots, housetrained, kids, dogs, cats, rescue_id, attributes, bio
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `, [
             animal.name,
             animal.breed,
@@ -407,7 +410,9 @@ function createAnimal(animal, imageData = null) {
             animal.kids,
             animal.dogs,
             animal.cats,
-            rescueId
+            rescueId,
+            attributesJson,
+            animal.bio || null
         ]);
     }
 }
@@ -433,7 +438,7 @@ function updateAnimal(id, animal, imageData = null) {
                 name = ?, breed = ?, slug = ?, age_long = ?, age_short = ?,
                 size = ?, gender = ?, shots = ?, housetrained = ?,
                 kids = ?, dogs = ?, cats = ?,
-                portrait_path = ?, portrait_mime = ?, portrait_data = ?, rescue_id = ?
+                portrait_path = ?, portrait_mime = ?, portrait_data = ?, rescue_id = ?, bio = ?
             WHERE id = ?
         `, [
             animal.name,
@@ -452,6 +457,7 @@ function updateAnimal(id, animal, imageData = null) {
             imageData.mime,
             imageBuffer,
             rescueId,
+            animal.bio || null,
             id
         ]);
     } else {
@@ -459,7 +465,7 @@ function updateAnimal(id, animal, imageData = null) {
             UPDATE animals SET
                 name = ?, breed = ?, slug = ?, age_long = ?, age_short = ?,
                 size = ?, gender = ?, shots = ?, housetrained = ?,
-                kids = ?, dogs = ?, cats = ?, rescue_id = ?
+                kids = ?, dogs = ?, cats = ?, rescue_id = ?, bio = ?
             WHERE id = ?
         `, [
             animal.name,
@@ -475,6 +481,7 @@ function updateAnimal(id, animal, imageData = null) {
             animal.dogs,
             animal.cats,
             rescueId,
+            animal.bio || null,
             id
         ]);
     }
@@ -488,6 +495,38 @@ function updateAnimal(id, animal, imageData = null) {
 function deleteAnimal(id) {
     if (!db) throw new Error('Database not initialized');
     return runPrepared('DELETE FROM animals WHERE id = ?', [id]);
+}
+
+/**
+ * Get attributes for an animal
+ * @param {number} id - Animal ID
+ * @returns {Array} - Array of attribute strings (max 16)
+ */
+function getAnimalAttributes(id) {
+    if (!db) throw new Error('Database not initialized');
+    const row = queryOnePrepared('SELECT attributes FROM animals WHERE id = ?', [id]);
+    if (!row || !row.attributes) return [];
+    try {
+        const attrs = JSON.parse(row.attributes);
+        return Array.isArray(attrs) ? attrs.slice(0, 16) : [];
+    } catch {
+        return [];
+    }
+}
+
+/**
+ * Update attributes for an animal
+ * @param {number} id - Animal ID
+ * @param {Array} attributes - Array of attribute strings (max 16)
+ * @returns {Object} - Result with changes count
+ */
+function updateAnimalAttributes(id, attributes) {
+    if (!db) throw new Error('Database not initialized');
+    // Ensure max 16 attributes and filter empty strings
+    const cleanAttrs = (Array.isArray(attributes) ? attributes : [])
+        .filter(a => typeof a === 'string' && a.trim())
+        .slice(0, 16);
+    return runPrepared('UPDATE animals SET attributes = ? WHERE id = ?', [JSON.stringify(cleanAttrs), id]);
 }
 
 /**
@@ -886,6 +925,178 @@ function setDefaultPrintProfile(id) {
     );
 }
 
+// ============================================================
+// Template Operations
+// ============================================================
+
+/**
+ * Get all templates
+ * @returns {Array} - Array of template objects (without html_template for list view)
+ */
+function getAllTemplates() {
+    return queryAll(`
+        SELECT id, name, description, config, is_builtin, created_at, updated_at
+        FROM templates
+        ORDER BY is_builtin DESC, name
+    `);
+}
+
+/**
+ * Get a template by ID
+ * @param {number} id - Template ID
+ * @returns {Object|undefined} - Template object with parsed config
+ */
+function getTemplateById(id) {
+    const template = queryOnePrepared(`
+        SELECT id, name, description, html_template, config, is_builtin, created_at, updated_at
+        FROM templates
+        WHERE id = ?
+    `, [id]);
+
+    if (template && template.config) {
+        template.config = JSON.parse(template.config);
+    }
+    return template;
+}
+
+/**
+ * Get a template by name
+ * @param {string} name - Template name
+ * @returns {Object|undefined} - Template object with parsed config
+ */
+function getTemplateByName(name) {
+    const template = queryOnePrepared(`
+        SELECT id, name, description, html_template, config, is_builtin, created_at, updated_at
+        FROM templates
+        WHERE name = ?
+    `, [name]);
+
+    if (template && template.config) {
+        template.config = JSON.parse(template.config);
+    }
+    return template;
+}
+
+/**
+ * Create a new template
+ * @param {Object} template - Template data { name, description, html_template, config }
+ * @returns {Object} - Result with lastInsertRowid
+ */
+function createTemplate(template) {
+    if (!db) throw new Error('Database not initialized');
+
+    const configStr = typeof template.config === 'string'
+        ? template.config
+        : JSON.stringify(template.config);
+
+    return runPrepared(`
+        INSERT INTO templates (name, description, html_template, config, is_builtin)
+        VALUES (?, ?, ?, ?, ?)
+    `, [
+        template.name,
+        template.description || null,
+        template.html_template,
+        configStr,
+        template.is_builtin ? 1 : 0
+    ]);
+}
+
+/**
+ * Update an existing template
+ * @param {number} id - Template ID
+ * @param {Object} template - Template data
+ * @returns {Object} - Result with changes count
+ */
+function updateTemplate(id, template) {
+    if (!db) throw new Error('Database not initialized');
+
+    const configStr = typeof template.config === 'string'
+        ? template.config
+        : JSON.stringify(template.config);
+
+    return runPrepared(`
+        UPDATE templates SET
+            name = ?, description = ?, html_template = ?, config = ?
+        WHERE id = ?
+    `, [
+        template.name,
+        template.description || null,
+        template.html_template,
+        configStr,
+        id
+    ]);
+}
+
+/**
+ * Delete a template by ID (only non-builtin templates can be deleted)
+ * @param {number} id - Template ID
+ * @returns {Object} - Result with changes count
+ */
+function deleteTemplate(id) {
+    if (!db) throw new Error('Database not initialized');
+
+    // Check if template is builtin
+    const template = getTemplateById(id);
+    if (template && template.is_builtin) {
+        throw new Error('Cannot delete built-in template');
+    }
+
+    return runPrepared('DELETE FROM templates WHERE id = ? AND is_builtin = 0', [id]);
+}
+
+// ============================================================
+// Settings Operations
+// ============================================================
+
+/**
+ * Get a setting value by key
+ * @param {string} key - Setting key
+ * @returns {string|null} - Setting value or null if not found
+ */
+function getSetting(key) {
+    if (!db) throw new Error('Database not initialized');
+    const row = queryOnePrepared('SELECT value FROM settings WHERE key = ?', [key]);
+    return row ? row.value : null;
+}
+
+/**
+ * Get all settings
+ * @returns {Object} - Object with all settings as key-value pairs
+ */
+function getAllSettings() {
+    if (!db) throw new Error('Database not initialized');
+    const rows = queryAll('SELECT key, value FROM settings');
+    const settings = {};
+    for (const row of rows) {
+        settings[row.key] = row.value;
+    }
+    return settings;
+}
+
+/**
+ * Set a setting value (insert or update)
+ * @param {string} key - Setting key
+ * @param {string} value - Setting value
+ * @returns {Object} - Result with changes count
+ */
+function setSetting(key, value) {
+    if (!db) throw new Error('Database not initialized');
+    return runPrepared(`
+        INSERT INTO settings (key, value) VALUES (?, ?)
+        ON CONFLICT(key) DO UPDATE SET value = excluded.value
+    `, [key, value]);
+}
+
+/**
+ * Delete a setting
+ * @param {string} key - Setting key
+ * @returns {Object} - Result with changes count
+ */
+function deleteSetting(key) {
+    if (!db) throw new Error('Database not initialized');
+    return runPrepared('DELETE FROM settings WHERE key = ?', [key]);
+}
+
 // Re-export migration and seed functions for external use
 const migrate = require('./db/migrate.js');
 const seeds = require('./db/seeds.js');
@@ -913,6 +1124,8 @@ module.exports = {
     updateAnimal,
     deleteAnimal,
     deleteAnimals,
+    getAnimalAttributes,
+    updateAnimalAttributes,
 
     // Rescue operations
     getAllRescues,
@@ -932,6 +1145,20 @@ module.exports = {
     updatePrintProfile,
     deletePrintProfile,
     setDefaultPrintProfile,
+
+    // Template operations
+    getAllTemplates,
+    getTemplateById,
+    getTemplateByName,
+    createTemplate,
+    updateTemplate,
+    deleteTemplate,
+
+    // Settings operations
+    getSetting,
+    getAllSettings,
+    setSetting,
+    deleteSetting,
 
     // Migration utilities
     migrations: {

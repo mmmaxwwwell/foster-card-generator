@@ -41,7 +41,8 @@ async function scrapeAnimalPage(url) {
                 kids: '?',
                 dogs: '?',
                 cats: '?',
-                imageUrl: ''
+                imageUrl: '',
+                bio: ''
             };
 
             // Helper function to get table cell value by header text
@@ -259,6 +260,27 @@ async function scrapeAnimalPage(url) {
                 }
             }
 
+            // Extract bio from pet-description section
+            const petDescription = document.querySelector('.pet-description');
+            if (petDescription) {
+                // Get all paragraph elements inside the description
+                const paragraphs = petDescription.querySelectorAll('p');
+                if (paragraphs.length > 0) {
+                    // Collect text from all paragraphs, preserving paragraph breaks
+                    const bioText = Array.from(paragraphs)
+                        .map(p => p.textContent.trim())
+                        .filter(text => text.length > 0)
+                        .join('\n\n');
+                    result.bio = bioText;
+                } else {
+                    // Fallback: get text content from reduced-description div
+                    const reducedDesc = petDescription.querySelector('.reduced-description');
+                    if (reducedDesc) {
+                        result.bio = reducedDesc.textContent.trim();
+                    }
+                }
+            }
+
             return result;
         });
 
@@ -307,11 +329,24 @@ async function scrapeAnimalPage(url) {
             }
         }
 
+        // Build attributes array from scraped data for the adoption flyer
+        const attributes = [];
+        if (data.breed) attributes.push(data.breed);
+        if (data.age_long) attributes.push(data.age_long);
+        if (data.size) attributes.push(data.size);
+        if (data.gender) attributes.push(data.gender);
+        if (data.shots) attributes.push('Up to date on shots');
+        if (data.housetrained) attributes.push('Housetrained');
+        if (data.kids === '1') attributes.push('Good with kids');
+        if (data.dogs === '1') attributes.push('Good with dogs');
+        if (data.cats === '1') attributes.push('Good with cats');
+
         // Return the scraped data
         return {
             ...data,
             imagePath: imagePath,
-            slug: url
+            slug: url,
+            attributes
         };
 
     } catch (error) {

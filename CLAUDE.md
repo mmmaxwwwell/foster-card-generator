@@ -4,10 +4,10 @@ See [AGENTS.md](AGENTS.md) for comprehensive documentation about this codebase.
 
 ## Quick Reference
 
-- **Purpose**: Electron desktop app for creating printable foster animal trading cards
-- **Stack**: Electron, sql.js, Puppeteer, Sharp, Handlebars
+- **Purpose**: Electron desktop app for creating printable foster animal business cards and flyers
+- **Stack**: Electron, sql.js, Puppeteer, Sharp, Handlebars, Preact + HTM
 - **Main entry**: `main.js` (Electron main process)
-- **UI**: `app/resources/` (vanilla JS, no framework)
+- **UI**: `app/resources/` (Preact + HTM components)
 - **Database**: `app/db.js` with migrations in `app/db/migrations/`
 
 ## Before Releases

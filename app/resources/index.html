@@ -4,6 +4,86 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Foster Animals</title>
+    <!-- Preact + HTM -->
+    <script src="https://unpkg.com/preact@10.19.3/dist/preact.umd.js"></script>
+    <script src="https://unpkg.com/preact@10.19.3/hooks/dist/hooks.umd.js"></script>
+    <script src="https://unpkg.com/htm@3.1.1/dist/htm.umd.js"></script>
+    <script>
+        // Make Preact hooks available globally
+        window.preactHooks = preactHooks;
+    </script>
+    <!-- CodeMirror 5 for syntax highlighting (UMD build compatible with Electron) -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/hint/show-hint.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/xml/xml.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/javascript/javascript.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/css/css.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/htmlmixed/htmlmixed.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/hint/show-hint.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/edit/closebrackets.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/edit/closetag.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/fold/foldcode.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/fold/foldgutter.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/fold/brace-fold.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/fold/xml-fold.min.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/fold/foldgutter.min.css">
+    <script>
+        // Handlebars variable completions for templates
+        const handlebarsVariables = [
+            {text: '{{name}}', displayText: '{{name}} - Animal name'},
+            {text: '{{breed}}', displayText: '{{breed}} - Animal breed'},
+            {text: '{{ageLong}}', displayText: '{{ageLong}} - Full age description'},
+            {text: '{{ageShort}}', displayText: '{{ageShort}} - Short age (e.g., "2y")'},
+            {text: '{{size}}', displayText: '{{size}} - Animal size'},
+            {text: '{{gender}}', displayText: '{{gender}} - Animal gender'},
+            {text: '{{shots}}', displayText: '{{shots}} - Vaccination status'},
+            {text: '{{housetrained}}', displayText: '{{housetrained}} - Housetrained status'},
+            {text: '{{kids}}', displayText: '{{kids}} - Good with kids'},
+            {text: '{{dogs}}', displayText: '{{dogs}} - Good with dogs'},
+            {text: '{{cats}}', displayText: '{{cats}} - Good with cats'},
+            {text: '{{slug}}', displayText: '{{slug}} - URL slug for animal'},
+            {text: '{{portrait}}', displayText: '{{portrait}} - Portrait image data URL'},
+            {text: '{{portraitPath}}', displayText: '{{portraitPath}} - Portrait file path'},
+            {text: '{{rescueName}}', displayText: '{{rescueName}} - Rescue organization name'},
+            {text: '{{rescueWebsite}}', displayText: '{{rescueWebsite}} - Rescue website URL'},
+            {text: '{{rescueLogo}}', displayText: '{{rescueLogo}} - Rescue logo path'},
+            {text: '{{logo}}', displayText: '{{logo}} - Logo image data URL'},
+            {text: '{{qrcode}}', displayText: '{{qrcode}} - QR code data URL'},
+        ];
+
+        // Custom hint function for Handlebars variables
+        CodeMirror.registerHelper('hint', 'handlebars', function(editor) {
+            const cur = editor.getCursor();
+            const token = editor.getTokenAt(cur);
+            const line = editor.getLine(cur.line);
+
+            // Find the start of the handlebars expression
+            let start = cur.ch;
+            while (start > 0 && line[start - 1] !== '{') {
+                start--;
+            }
+            // Include the opening braces
+            if (start > 0 && line[start - 1] === '{') start--;
+            if (start > 0 && line[start - 1] === '{') start--;
+
+            const prefix = line.slice(start, cur.ch).toLowerCase();
+
+            const filtered = handlebarsVariables.filter(v =>
+                v.text.toLowerCase().startsWith(prefix) ||
+                v.text.toLowerCase().includes(prefix)
+            );
+
+            return {
+                list: filtered.length ? filtered : handlebarsVariables,
+                from: CodeMirror.Pos(cur.line, start),
+                to: CodeMirror.Pos(cur.line, cur.ch)
+            };
+        });
+
+        // Mark CodeMirror as ready
+        window.CodeMirrorReady = true;
+    </script>
     <style>
         * {
             margin: 0;
@@ -44,6 +124,7 @@
             gap: 10px;
             justify-content: center;
             margin-bottom: 20px;
+            flex-wrap: wrap;
         }
 
         .controls button {
@@ -119,6 +200,12 @@
             color: #666;
             font-size: 0.9rem;
             margin-bottom: 15px;
+            height: 2.7em;
+            line-height: 1.35em;
+            overflow: hidden;
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
         }
 
         .animal-details {
@@ -149,6 +236,7 @@
             margin-top: 15px;
             padding-top: 15px;
             border-top: 1px solid #eee;
+            flex-wrap: wrap;
         }
 
         .compat-badge {
@@ -164,6 +252,7 @@
 
         .card-actions {
             display: flex;
+            flex-direction: column;
             gap: 8px;
             margin-top: 15px;
             padding-top: 15px;
@@ -201,6 +290,69 @@
             transform: translateY(-1px);
         }
 
+        .card-actions-section {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            flex: 1;
+        }
+
+        .card-actions-label {
+            font-size: 0.7rem;
+            color: #999;
+            text-transform: uppercase;
+            font-weight: 600;
+            letter-spacing: 0.5px;
+        }
+
+        .card-actions-buttons {
+            display: flex;
+            gap: 6px;
+        }
+
+        .card-actions-buttons button {
+            flex: 1;
+            padding: 6px 8px;
+            font-size: 0.8rem;
+        }
+
+        .btn-print-flyer {
+            width: 100%;
+            padding: 10px 12px;
+            border: none;
+            border-radius: 6px;
+            font-size: 0.85rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+            background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%);
+            color: white;
+            margin-top: 8px;
+        }
+
+        .btn-print-flyer:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 2px 8px rgba(76, 175, 80, 0.4);
+        }
+
+        .custom-template-buttons {
+            flex-direction: column;
+        }
+
+        .btn-print-template {
+            background: linear-gradient(135deg, #ff9800 0%, #f57c00 100%);
+            color: white;
+            width: 100%;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .btn-print-template:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 2px 8px rgba(255, 152, 0, 0.4);
+        }
+
         .loading {
             text-align: center;
             color: white;
@@ -230,7 +382,6 @@
 
         /* Modal styles */
         .modal-overlay {
-            display: none;
             position: fixed;
             top: 0;
             left: 0;
@@ -238,6 +389,7 @@
             bottom: 0;
             background: rgba(0,0,0,0.7);
             z-index: 1000;
+            display: flex;
             align-items: center;
             justify-content: center;
             padding: 20px;
@@ -290,6 +442,7 @@
         .modal-image-container {
             position: relative;
             margin-bottom: 20px;
+            cursor: pointer;
         }
 
         .modal-image {
@@ -324,7 +477,6 @@
             justify-content: center;
             opacity: 0;
             transition: opacity 0.2s;
-            cursor: pointer;
         }
 
         .modal-image-container:hover .image-overlay {
@@ -344,6 +496,52 @@
             margin-bottom: 5px;
         }
 
+        .image-overlay-buttons {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            align-items: center;
+        }
+
+        .image-overlay-btn {
+            background: rgba(255, 255, 255, 0.95);
+            border: none;
+            border-radius: 8px;
+            padding: 10px 20px;
+            cursor: pointer;
+            font-weight: 600;
+            font-size: 0.9rem;
+            color: #333;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            transition: transform 0.2s, background-color 0.2s;
+            min-width: 160px;
+            justify-content: center;
+        }
+
+        .image-overlay-btn:hover {
+            background: white;
+            transform: scale(1.05);
+        }
+
+        .image-overlay-btn span {
+            font-size: 1.2rem;
+        }
+
+        .ai-edit-image-container {
+            text-align: center;
+            margin-bottom: 15px;
+        }
+
+        .ai-edit-preview {
+            max-width: 100%;
+            max-height: 300px;
+            object-fit: contain;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+
         .form-group {
             margin-bottom: 15px;
         }
@@ -357,17 +555,20 @@
         }
 
         .form-group input,
-        .form-group select {
+        .form-group select,
+        .form-group textarea {
             width: 100%;
             padding: 10px 12px;
             border: 2px solid #e0e0e0;
             border-radius: 8px;
             font-size: 1rem;
             transition: border-color 0.2s;
+            box-sizing: border-box;
         }
 
         .form-group input:focus,
-        .form-group select:focus {
+        .form-group select:focus,
+        .form-group textarea:focus {
             outline: none;
             border-color: #667eea;
         }
@@ -402,12 +603,17 @@
             transition: transform 0.2s, box-shadow 0.2s;
         }
 
+        .btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
         .btn-primary {
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             color: white;
         }
 
-        .btn-primary:hover {
+        .btn-primary:hover:not(:disabled) {
             transform: translateY(-2px);
             box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
         }
@@ -417,7 +623,7 @@
             color: #333;
         }
 
-        .btn-secondary:hover {
+        .btn-secondary:hover:not(:disabled) {
             background: #d0d0d0;
         }
 
@@ -426,19 +632,26 @@
             color: white;
         }
 
-        .btn-danger:hover {
+        .btn-danger:hover:not(:disabled) {
             background: #c82333;
         }
 
-        .toast {
+        /* Toast styles */
+        .toast-container {
             position: fixed;
             bottom: 20px;
             right: 20px;
+            z-index: 2000;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .toast {
             padding: 15px 25px;
             border-radius: 8px;
             color: white;
             font-weight: 500;
-            z-index: 2000;
             animation: slideIn 0.3s ease;
         }
 
@@ -465,7 +678,7 @@
             display: flex;
             flex-direction: column;
             gap: 15px;
-            padding: 30px;
+            padding: 10px 0;
         }
 
         .option-button {
@@ -606,14 +819,14 @@
         }
 
         .delete-animal-item:hover {
-            border-color: #dc3545;
+            border-color: #667eea;
             transform: translateY(-2px);
-            box-shadow: 0 4px 12px rgba(220, 53, 69, 0.2);
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.2);
         }
 
         .delete-animal-item.selected {
-            border-color: #dc3545;
-            background: #fff5f5;
+            border-color: #667eea;
+            background: #e8f0fe;
         }
 
         .delete-animal-item input[type="checkbox"] {
@@ -651,16 +864,6 @@
             word-wrap: break-word;
         }
 
-        #printMultipleModal .delete-animal-item:hover {
-            border-color: #667eea;
-            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.2);
-        }
-
-        #printMultipleModal .delete-animal-item.selected {
-            border-color: #667eea;
-            background: #e8f0fe;
-        }
-
         /* Print Settings Modal Styles */
         .print-preview-container {
             background: #f5f5f5;
@@ -672,9 +875,96 @@
 
         .print-preview-image {
             max-width: 100%;
-            max-height: 150px;
+            max-height: 300px;
             border-radius: 4px;
             box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+
+        /* Two-column modal layouts */
+        .modal-two-column {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 24px;
+        }
+
+        .modal-column-left {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .modal-column-right {
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* Edit Animal Modal - right column styles */
+        .edit-animal-right-column {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+
+        .edit-animal-right-column .form-group {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .edit-animal-right-column textarea {
+            flex: 1;
+            min-height: 200px;
+            resize: vertical;
+        }
+
+        .edit-animal-buttons {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            margin-top: auto;
+        }
+
+        .edit-animal-buttons .btn {
+            width: 100%;
+        }
+
+        /* Print Modal - right column for preview */
+        .print-modal-right-column {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .print-modal-right-column .print-preview-container {
+            flex: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-bottom: 0;
+            min-height: 300px;
+        }
+
+        .print-modal-right-column .print-preview-image {
+            max-height: 400px;
+            width: auto;
+            max-width: 100%;
+        }
+
+        /* Responsive - collapse to single column on narrow screens */
+        @media (max-width: 700px) {
+            .modal-two-column {
+                grid-template-columns: 1fr;
+            }
+
+            .edit-animal-right-column textarea {
+                min-height: 120px;
+            }
+
+            .print-modal-right-column .print-preview-container {
+                min-height: 150px;
+            }
+
+            .print-modal-right-column .print-preview-image {
+                max-height: 150px;
+            }
         }
 
         .orientation-options {
@@ -701,12 +991,7 @@
             display: none;
         }
 
-        .orientation-option input[type="radio"]:checked + .orientation-icon {
-            border-color: #667eea;
-            background: #667eea;
-        }
-
-        .orientation-option input[type="radio"]:checked ~ span:last-child {
+        .orientation-option input[type="radio"]:checked + span {
             color: #667eea;
             font-weight: 600;
         }
@@ -727,38 +1012,58 @@
             height: 24px;
         }
 
-        .printer-status {
-            padding: 10px;
-            border-radius: 6px;
-            font-size: 0.9rem;
-            margin-top: 15px;
-            display: none;
+        /* Template-locked styles */
+        .locked-by-template {
+            opacity: 0.7;
+            cursor: not-allowed;
         }
 
-        .printer-status.loading {
-            display: block;
-            background: #e8f0fe;
-            color: #667eea;
+        .locked-by-template select:disabled {
+            background-color: #f0f0f0;
         }
 
-        .printer-status.error {
-            display: block;
-            background: #f8d7da;
-            color: #721c24;
+        .orientation-options.locked-by-template .orientation-option {
+            opacity: 0.7;
+            cursor: not-allowed;
         }
 
-        .printer-status.success {
-            display: block;
-            background: #d4edda;
-            color: #155724;
+        .template-info-section {
+            background: linear-gradient(135deg, #e8f4fd 0%, #f0e8fd 100%);
+            border: 1px solid #d0d8e8;
+            border-radius: 8px;
+            padding: 12px 15px;
+            margin-bottom: 15px;
         }
 
-        #printerSelect {
-            width: 100%;
+        .template-info-header {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 8px;
         }
 
-        #copiesInput {
-            width: 100%;
+        .template-info-icon {
+            font-size: 16px;
+        }
+
+        .template-info-title {
+            font-weight: 600;
+            color: #4a5568;
+            font-size: 13px;
+        }
+
+        .template-info-details {
+            display: flex;
+            gap: 15px;
+            flex-wrap: wrap;
+        }
+
+        .template-info-item {
+            font-size: 12px;
+            color: #667;
+            background: rgba(255,255,255,0.7);
+            padding: 4px 10px;
+            border-radius: 4px;
         }
 
         /* Print Profile Styles */
@@ -766,6 +1071,7 @@
             display: flex;
             gap: 10px;
             align-items: flex-end;
+            margin-bottom: 15px;
         }
 
         .printer-row .form-group {
@@ -774,7 +1080,7 @@
         }
 
         .btn-icon {
-            padding: 8px;
+            padding: 10px;
             display: flex;
             align-items: center;
             justify-content: center;
@@ -783,6 +1089,7 @@
             border-radius: 6px;
             cursor: pointer;
             transition: background 0.2s;
+            font-size: 1.2rem;
         }
 
         .btn-icon:hover {
@@ -793,6 +1100,7 @@
             display: flex;
             gap: 10px;
             align-items: flex-end;
+            margin-bottom: 15px;
         }
 
         .profile-row .form-group {
@@ -808,10 +1116,6 @@
         .profile-buttons button {
             padding: 8px 12px;
             font-size: 0.85rem;
-        }
-
-        #printProfileSelect {
-            width: 100%;
         }
 
         .profile-list {
@@ -844,9 +1148,10 @@
             display: flex;
             align-items: center;
             gap: 8px;
+            flex-wrap: wrap;
         }
 
-        .profile-item-name .default-badge {
+        .default-badge {
             background: #667eea;
             color: white;
             font-size: 0.7rem;
@@ -864,6 +1169,7 @@
         .profile-item-actions {
             display: flex;
             gap: 8px;
+            flex-wrap: wrap;
         }
 
         .profile-item-actions button {
@@ -875,28 +1181,6 @@
             text-align: center;
             padding: 30px;
             color: #666;
-        }
-
-        .save-profile-settings {
-            background: #f8f9fa;
-            border-radius: 8px;
-            padding: 15px;
-            margin-bottom: 15px;
-        }
-
-        .save-profile-settings-row {
-            display: flex;
-            justify-content: space-between;
-            padding: 5px 0;
-            font-size: 0.9rem;
-        }
-
-        .save-profile-settings-row span:first-child {
-            color: #666;
-        }
-
-        .save-profile-settings-row span:last-child {
-            font-weight: 500;
         }
 
         .checkbox-option {
@@ -1001,779 +1285,665 @@
             height: auto;
         }
 
-        .btn-generate-cards {
+        /* ============================================================
+           Template Editor Screen Styles
+           ============================================================ */
+        .template-editor-screen {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: #f5f5f5;
+            z-index: 1000;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .template-editor-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 15px 20px;
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+        }
+
+        .template-editor-title {
+            display: flex;
+            align-items: center;
+            flex: 1;
+            min-width: 0;
+        }
+
+        .template-editor-name-desc {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            flex: 1;
+            min-width: 0;
+            max-width: 400px;
+        }
+
+        .template-name-input {
+            background: rgba(255,255,255,0.15);
+            border: 1px solid rgba(255,255,255,0.3);
+            border-radius: 6px;
+            padding: 6px 12px;
+            color: white;
+            font-size: 1.1rem;
+            font-weight: 600;
+        }
+
+        .template-name-input::placeholder {
+            color: rgba(255,255,255,0.6);
+        }
+
+        .template-name-input:focus {
+            outline: none;
+            background: rgba(255,255,255,0.25);
+            border-color: rgba(255,255,255,0.5);
+        }
+
+        .template-name-input:disabled {
+            opacity: 0.7;
+            cursor: not-allowed;
+        }
+
+        .template-desc-input {
+            background: rgba(255,255,255,0.1);
+            border: 1px solid rgba(255,255,255,0.2);
+            border-radius: 4px;
+            padding: 4px 10px;
+            color: rgba(255,255,255,0.9);
+            font-size: 0.85rem;
+        }
+
+        .template-desc-input::placeholder {
+            color: rgba(255,255,255,0.5);
+        }
+
+        .template-desc-input:focus {
+            outline: none;
+            background: rgba(255,255,255,0.2);
+            border-color: rgba(255,255,255,0.4);
+        }
+
+        .template-desc-input:disabled {
+            opacity: 0.7;
+            cursor: not-allowed;
+        }
+
+        .template-editor-title h2 {
+            margin: 0;
+            font-size: 1.3rem;
+            font-weight: 500;
+        }
+
+        .template-editor-title .builtin-badge {
+            margin-left: 12px;
+            padding: 4px 10px;
+            background: rgba(255,255,255,0.2);
+            border-radius: 12px;
+            font-size: 0.75rem;
+        }
+
+        .template-editor-actions {
+            display: flex;
+            gap: 10px;
+        }
+
+        .template-editor-content {
+            flex: 1;
+            display: flex;
+            overflow: hidden;
+            padding: 15px;
+            gap: 15px;
+        }
+
+        .template-editor-left {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            min-width: 0;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+
+        .template-editor-meta {
+            display: flex;
+            gap: 15px;
+            padding: 15px;
+            background: #fafafa;
+            border-bottom: 1px solid #e0e0e0;
+        }
+
+        .template-editor-meta .form-group {
+            margin-bottom: 0;
+        }
+
+        .template-editor-tabs {
+            display: flex;
+            padding: 0 15px;
+            background: #fafafa;
+            border-bottom: 1px solid #e0e0e0;
+        }
+
+        .tab-btn {
+            padding: 12px 20px;
+            border: none;
+            background: transparent;
+            color: #666;
+            font-size: 0.9rem;
+            cursor: pointer;
+            border-bottom: 3px solid transparent;
+            margin-bottom: -1px;
+            transition: all 0.2s;
+        }
+
+        .tab-btn:hover {
+            color: #333;
+            background: rgba(0,0,0,0.03);
+        }
+
+        .tab-btn.active {
+            color: #667eea;
+            border-bottom-color: #667eea;
+            font-weight: 500;
+        }
+
+        .tab-error {
+            display: inline-block;
+            width: 18px;
+            height: 18px;
+            line-height: 18px;
+            text-align: center;
+            background: #d32f2f;
+            color: white;
+            border-radius: 50%;
+            font-size: 0.75rem;
+            margin-left: 6px;
+        }
+
+        .template-editor-tab-content {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            padding: 15px;
+        }
+
+        .code-editor {
+            flex: 1;
+            width: 100%;
+            padding: 15px;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+            font-size: 13px;
+            line-height: 1.5;
+            resize: none;
+            background: #fafafa;
+            transition: border-color 0.2s;
+        }
+
+        .code-editor:focus {
+            outline: none;
+            border-color: #667eea;
+            background: white;
+        }
+
+        .code-editor:disabled {
+            background: #f0f0f0;
+            color: #666;
+        }
+
+        /* CodeMirror container styles */
+        .codemirror-container {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            overflow: hidden;
+            background: #fafafa;
+        }
+
+        .codemirror-container .CodeMirror {
+            flex: 1;
+            height: 100%;
+            font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+            font-size: 13px;
+            line-height: 1.5;
+        }
+
+        .codemirror-container:focus-within {
+            border-color: #667eea;
+        }
+
+        /* CodeMirror gutter styling */
+        .codemirror-container .CodeMirror-gutters {
+            background: #fafafa;
+            border-right: 1px solid #e0e0e0;
+        }
+
+        /* CodeMirror autocomplete/hint styles */
+        .CodeMirror-hints {
+            font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+            font-size: 13px;
+            border: 1px solid #e0e0e0;
+            border-radius: 6px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            background: white;
+            z-index: 10000;
+        }
+
+        .CodeMirror-hint {
+            padding: 4px 10px;
+            white-space: nowrap;
+            cursor: pointer;
+        }
+
+        .CodeMirror-hint-active {
+            background: #667eea;
             color: white;
         }
 
-        .btn-generate-cards:hover {
-            transform: translateY(-1px);
-            box-shadow: 0 2px 8px rgba(102, 126, 234, 0.4);
+        .config-error {
+            color: #d32f2f;
+            font-size: 0.85rem;
+            margin-top: 8px;
+            padding: 8px 12px;
+            background: #ffebee;
+            border-radius: 4px;
+        }
+
+        .variables-help {
+            padding: 10px;
+            overflow-y: auto;
+            font-size: 0.9rem;
+        }
+
+        .variables-help h4 {
+            margin: 15px 0 8px 0;
+            color: #333;
+        }
+
+        .variables-help h4:first-child {
+            margin-top: 0;
+        }
+
+        .variables-help code {
+            display: block;
+            padding: 10px 12px;
+            background: #f5f5f5;
+            border-radius: 4px;
+            font-family: 'Consolas', 'Monaco', monospace;
+            font-size: 0.85rem;
+            word-break: break-all;
+        }
+
+        .variables-help pre {
+            padding: 12px;
+            background: #f5f5f5;
+            border-radius: 4px;
+            font-size: 0.8rem;
+            overflow-x: auto;
+        }
+
+        .variables-help p {
+            color: #666;
+            margin: 5px 0 15px 0;
+        }
+
+        .variables-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.85rem;
+        }
+
+        .variables-table th,
+        .variables-table td {
+            padding: 8px 12px;
+            text-align: left;
+            border-bottom: 1px solid #e0e0e0;
+        }
+
+        .variables-table th {
+            background: #f5f5f5;
+            font-weight: 600;
+            color: #333;
+        }
+
+        .variables-table td code {
+            background: #e8f0fe;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-family: 'Consolas', 'Monaco', monospace;
+            color: #667eea;
+        }
+
+        .variables-table .variable-value {
+            font-family: inherit;
+            color: #333;
+            word-break: break-all;
+            max-width: 250px;
+        }
+
+        .variables-table tr:hover {
+            background: #fafafa;
+        }
+
+        /* Preview panel */
+        .template-editor-right {
+            width: 450px;
+            flex-shrink: 0;
+            display: flex;
+            flex-direction: column;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+
+        .preview-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px 15px;
+            background: #fafafa;
+            border-bottom: 1px solid #e0e0e0;
+            font-weight: 500;
+            color: #333;
+        }
+
+        .preview-animal-select {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .preview-animal-select label {
+            font-size: 0.9rem;
+            color: #666;
+        }
+
+        .preview-animal-select select {
+            padding: 4px 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 0.85rem;
+            background: white;
+            cursor: pointer;
+            max-width: 150px;
+        }
+
+        .preview-animal-select select:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .preview-controls {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .preview-controls span {
+            min-width: 45px;
+            text-align: center;
+            font-size: 0.85rem;
+            color: #666;
+        }
+
+        .btn-sm {
+            padding: 6px 14px;
+            font-size: 0.85rem;
+        }
+
+        .preview-container {
+            flex: 1;
+            overflow: auto;
+            background: #e0e0e0;
+            cursor: pointer;
+            position: relative;
+        }
+
+        .preview-container::after {
+            content: 'Click for fullscreen';
+            position: absolute;
+            bottom: 10px;
+            right: 10px;
+            padding: 5px 10px;
+            background: rgba(0,0,0,0.6);
+            color: white;
+            font-size: 0.75rem;
+            border-radius: 4px;
+            opacity: 0;
+            transition: opacity 0.2s;
+            pointer-events: none;
+        }
+
+        .preview-container:hover::after {
+            opacity: 1;
+        }
+
+        .preview-page-wrapper {
+            display: inline-block;
+            background: white;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+        }
+
+        .preview-info {
+            padding: 8px 15px;
+            background: #fafafa;
+            border-top: 1px solid #e0e0e0;
+            font-size: 0.8rem;
+            color: #666;
+            text-align: center;
+        }
+
+        /* Fullscreen preview */
+        .template-editor-fullscreen-preview {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0,0,0,0.9);
+            z-index: 2000;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .fullscreen-preview-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 15px 20px;
+            background: #333;
+            color: white;
+        }
+
+        .fullscreen-preview-controls {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .fullscreen-preview-controls span {
+            color: white;
+        }
+
+        .fullscreen-preview-container {
+            flex: 1;
+            overflow: auto;
+            display: flex;
+            justify-content: center;
+            padding: 20px;
+            background: #666;
+        }
+
+        .fullscreen-preview-container iframe {
+            box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+        }
+
+        /* ============================================================
+           Settings Modal Styles
+           ============================================================ */
+        .settings-list {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+        }
+
+        .settings-list-item {
+            display: flex;
+            flex-direction: column;
+            border: 1px solid #e0e0e0;
+            border-radius: 8px;
+            background: white;
+            overflow: hidden;
+            transition: border-color 0.2s;
+        }
+
+        .settings-list-item:hover {
+            border-color: #667eea;
+        }
+
+        .settings-list-item:not(.settings-list-item-expandable) {
+            cursor: pointer;
+        }
+
+        .settings-list-item:not(.settings-list-item-expandable):hover {
+            background: #fafafa;
+        }
+
+        .settings-list-item-header {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 14px 16px;
+        }
+
+        .settings-list-item-expandable .settings-list-item-header {
+            border-bottom: 1px solid #e8e8e8;
+        }
+
+        .settings-list-item-icon {
+            font-size: 1.4rem;
+            width: 40px;
+            height: 40px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: linear-gradient(135deg, #f5f7fa 0%, #e8ecf3 100%);
+            border-radius: 8px;
+            flex-shrink: 0;
+        }
+
+        .settings-list-item-text {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+            flex: 1;
+            min-width: 0;
+        }
+
+        .settings-list-item-text strong {
+            font-size: 0.95rem;
+            color: #333;
+        }
+
+        .settings-list-item-text small {
+            font-size: 0.8rem;
+            color: #666;
+        }
+
+        .settings-list-item-arrow {
+            font-size: 1.4rem;
+            color: #999;
+            font-weight: 300;
+        }
+
+        .settings-list-item-content {
+            padding: 14px 16px;
+            background: #fafafa;
+        }
+
+        .api-key-input-container {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+        }
+
+        .api-key-input {
+            flex: 1;
+            padding: 10px 12px;
+            border: 2px solid #e0e0e0;
+            border-radius: 6px;
+            font-size: 0.9rem;
+            font-family: 'Consolas', 'Monaco', monospace;
+            transition: border-color 0.2s;
+        }
+
+        .api-key-input:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .api-key-toggle {
+            padding: 8px 10px;
+            font-size: 1.1rem;
+            background: white;
+            border: 2px solid #e0e0e0;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .api-key-toggle:hover {
+            background: #f0f0f0;
+            border-color: #ccc;
+        }
+
+        .api-key-actions {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-top: 10px;
+        }
+
+        .api-key-link {
+            font-size: 0.85rem;
+            color: #667eea;
+            text-decoration: none;
+        }
+
+        .api-key-link:hover {
+            text-decoration: underline;
+        }
+
+        /* Settings button in control bar */
+        .btn-settings {
+            background: linear-gradient(135deg, #6c757d 0%, #495057 100%);
+            color: white;
+        }
+
+        .btn-settings:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(108, 117, 125, 0.4);
         }
     </style>
 </head>
 <body>
-    <div class="container">
-        <header>
-            <h1>Foster Animals</h1>
-            <p id="subtitle">Loading...</p>
-        </header>
+    <!-- Preact App Root -->
+    <div id="app"></div>
 
-        <div class="controls">
-            <button onclick="openCreateModal()">Create Animal</button>
-            <button onclick="loadAnimals()">Refresh</button>
-            <button onclick="openPrintMultipleModal()">Print Multiple</button>
-            <button onclick="openDeleteMultipleModal()" class="btn-danger-outline">Delete Multiple</button>
-            <button onclick="openManageProfilesFromMain()">Manage Print Profiles</button>
-            <button onclick="openManageRescuesModal()">Manage Rescues</button>
-        </div>
-
-        <div id="content" class="loading">
-            Loading animals...
-        </div>
-
-    </div>
-
-    <!-- Rescue Selection Modal -->
-    <div id="rescueSelectModal" class="modal-overlay">
-        <div class="modal">
-            <div class="modal-header">
-                <h2>Select Rescue Organization</h2>
-                <button class="modal-close" onclick="closeRescueSelectModal()">&times;</button>
-            </div>
-            <div class="create-options">
-                <button class="option-button" onclick="selectRescue('wagtopia')">
-                    <h3>Paws Rescue League</h3>
-                    <p>Browse animals from Wagtopia</p>
-                </button>
-                <button class="option-button" onclick="selectRescue('adoptapet')">
-                    <h3>Brass City Rescue</h3>
-                    <p>Browse animals from Adoptapet</p>
-                </button>
-            </div>
-        </div>
-    </div>
-
-    <!-- Create Animal Modal -->
-    <div id="createModal" class="modal-overlay">
-        <div class="modal">
-            <div class="modal-header">
-                <h2>Create New Animal</h2>
-                <button class="modal-close" onclick="closeCreateModal()">&times;</button>
-            </div>
-            <div class="create-options">
-                <button class="option-button" onclick="selectCreateOption('manual')">
-                    <h3>Enter Data</h3>
-                    <p>Manually enter all animal information and details</p>
-                </button>
-                <button class="option-button" onclick="selectCreateOption('scrape')">
-                    <h3>Scrape from URL</h3>
-                    <p>Import animal data from an adoption website URL</p>
-                </button>
-                <button class="option-button" onclick="selectCreateOption('selectFromSite')">
-                    <h3>Select from Site</h3>
-                    <p>Browse and select multiple animals from a rescue site</p>
-                </button>
-            </div>
-        </div>
-    </div>
-
-    <!-- URL Scrape Modal -->
-    <div id="scrapeModal" class="modal-overlay">
-        <div class="modal">
-            <div class="modal-header">
-                <h2>Scrape from URL</h2>
-                <button class="modal-close" onclick="closeScrapeModal()">&times;</button>
-            </div>
-            <div class="modal-body">
-                <div class="form-group">
-                    <label for="scrapeUrl">Adoption Page URL</label>
-                    <input type="text" id="scrapeUrl" placeholder="https://example.com/adopt/dog-name" required>
-                </div>
-                <p style="color: #666; font-size: 0.9rem; margin-top: 10px;">
-                    Enter the URL of an animal adoption page to automatically extract information.
-                </p>
-            </div>
-            <div class="modal-footer">
-                <button class="btn btn-secondary" onclick="closeScrapeModal()">Cancel</button>
-                <button class="btn btn-primary" onclick="scrapeUrl()">Scrape Data</button>
-            </div>
-        </div>
-    </div>
-
-    <!-- Manual Entry Modal -->
-    <div id="manualEntryModal" class="modal-overlay">
-        <div class="modal">
-            <div class="modal-header">
-                <h2>Create New Animal</h2>
-                <button class="modal-close" onclick="closeManualEntryModal()">&times;</button>
-            </div>
-            <div class="modal-body">
-                <input type="file" id="newAnimalImageInput" accept="image/jpeg,image/jpg,image/png,image/gif,image/webp" style="display: none;" onchange="handleNewAnimalImageSelected(event)">
-                <div class="modal-image-container" onclick="document.getElementById('newAnimalImageInput').click()">
-                    <div id="newAnimalNoImage" class="modal-no-image">🐕</div>
-                    <div class="image-overlay">
-                        <div class="image-overlay-text">
-                            <span>📷</span>
-                            Click to add photo
-                        </div>
-                    </div>
-                </div>
-                <form id="createForm">
-                    <div class="form-row">
-                        <div class="form-group">
-                            <label for="newName">Name</label>
-                            <input type="text" id="newName" required>
-                        </div>
-                        <div class="form-group">
-                            <label for="newBreed">Breed</label>
-                            <input type="text" id="newBreed" required>
-                        </div>
-                    </div>
-
-                    <div class="form-group">
-                        <label for="newSlug">Adoption URL</label>
-                        <input type="text" id="newSlug" required>
-                    </div>
-
-                    <div class="form-row">
-                        <div class="form-group">
-                            <label for="newAgeLong">Age (Long)</label>
-                            <input type="text" id="newAgeLong" placeholder="e.g., 2 Years" required>
-                        </div>
-                        <div class="form-group">
-                            <label for="newAgeShort">Age (Short)</label>
-                            <input type="text" id="newAgeShort" placeholder="e.g., 2 Yr" required>
-                        </div>
-                    </div>
-
-                    <div class="form-row-3">
-                        <div class="form-group">
-                            <label for="newSize">Size</label>
-                            <select id="newSize" required>
-                                <option value="Small">Small</option>
-                                <option value="Medium" selected>Medium</option>
-                                <option value="Large">Large</option>
-                            </select>
-                        </div>
-                        <div class="form-group">
-                            <label for="newGender">Gender</label>
-                            <select id="newGender" required>
-                                <option value="Male">Male</option>
-                                <option value="Female">Female</option>
-                                <option value="Neutered(M)">Neutered(M)</option>
-                                <option value="Spayed(F)">Spayed(F)</option>
-                            </select>
-                        </div>
-                        <div class="form-group">
-                            <label for="newShots">Shots</label>
-                            <select id="newShots" required>
-                                <option value="1" selected>Yes</option>
-                                <option value="0">No</option>
-                            </select>
-                        </div>
-                    </div>
-
-                    <div class="form-row">
-                        <div class="form-group">
-                            <label for="newHousetrained">Housetrained</label>
-                            <select id="newHousetrained" required>
-                                <option value="1" selected>Yes</option>
-                                <option value="0">No</option>
-                            </select>
-                        </div>
-                        <div class="form-group">
-                            <label for="newRescue">Rescue Organization</label>
-                            <select id="newRescue" required>
-                                <!-- Populated dynamically -->
-                            </select>
-                        </div>
-                    </div>
-
-                    <div class="form-row-3">
-                        <div class="form-group">
-                            <label for="newKids">Good with Kids</label>
-                            <select id="newKids" required>
-                                <option value="1">Yes</option>
-                                <option value="0">No</option>
-                                <option value="?" selected>Unknown</option>
-                            </select>
-                        </div>
-                        <div class="form-group">
-                            <label for="newDogs">Good with Dogs</label>
-                            <select id="newDogs" required>
-                                <option value="1">Yes</option>
-                                <option value="0">No</option>
-                                <option value="?" selected>Unknown</option>
-                            </select>
-                        </div>
-                        <div class="form-group">
-                            <label for="newCats">Good with Cats</label>
-                            <select id="newCats" required>
-                                <option value="1">Yes</option>
-                                <option value="0">No</option>
-                                <option value="?" selected>Unknown</option>
-                            </select>
-                        </div>
-                    </div>
-                </form>
-            </div>
-            <div class="modal-footer">
-                <button class="btn btn-secondary" onclick="closeManualEntryModal()">Cancel</button>
-                <button class="btn btn-primary" onclick="createAnimal()">Create Animal</button>
-            </div>
-        </div>
-    </div>
-
-    <!-- Edit Modal -->
-    <div id="editModal" class="modal-overlay">
-        <div class="modal">
-            <div class="modal-body">
-                <input type="file" id="editImageInput" accept="image/jpeg,image/jpg,image/png,image/gif,image/webp" style="display: none;" onchange="handleEditImageSelected(event)">
-                <div class="modal-image-container" onclick="document.getElementById('editImageInput').click()">
-                    <img id="modalImage" class="modal-image" src="" alt="">
-                    <div id="modalNoImage" class="modal-no-image" style="display: none;">🐕</div>
-                    <div class="image-overlay">
-                        <div class="image-overlay-text">
-                            <span>📷</span>
-                            Click to change photo
-                        </div>
-                    </div>
-                </div>
-                <form id="editForm">
-                    <input type="hidden" id="animalId">
-
-                    <div class="form-row">
-                        <div class="form-group">
-                            <label for="name">Name</label>
-                            <input type="text" id="name" required>
-                        </div>
-                        <div class="form-group">
-                            <label for="breed">Breed</label>
-                            <input type="text" id="breed" required>
-                        </div>
-                    </div>
-
-                    <div class="form-group">
-                        <label for="slug">Adoption URL</label>
-                        <input type="text" id="slug" required>
-                    </div>
-
-                    <div class="form-row">
-                        <div class="form-group">
-                            <label for="ageLong">Age (Long)</label>
-                            <input type="text" id="ageLong" placeholder="e.g., 2 Years" required>
-                        </div>
-                        <div class="form-group">
-                            <label for="ageShort">Age (Short)</label>
-                            <input type="text" id="ageShort" placeholder="e.g., 2 Yr" required>
-                        </div>
-                    </div>
-
-                    <div class="form-row-3">
-                        <div class="form-group">
-                            <label for="size">Size</label>
-                            <select id="size" required>
-                                <option value="Small">Small</option>
-                                <option value="Medium">Medium</option>
-                                <option value="Large">Large</option>
-                            </select>
-                        </div>
-                        <div class="form-group">
-                            <label for="gender">Gender</label>
-                            <select id="gender" required>
-                                <option value="Male">Male</option>
-                                <option value="Female">Female</option>
-                                <option value="Neutered(M)">Neutered(M)</option>
-                                <option value="Spayed(F)">Spayed(F)</option>
-                            </select>
-                        </div>
-                        <div class="form-group">
-                            <label for="shots">Shots</label>
-                            <select id="shots" required>
-                                <option value="1">Yes</option>
-                                <option value="0">No</option>
-                            </select>
-                        </div>
-                    </div>
-
-                    <div class="form-row">
-                        <div class="form-group">
-                            <label for="housetrained">Housetrained</label>
-                            <select id="housetrained" required>
-                                <option value="1">Yes</option>
-                                <option value="0">No</option>
-                            </select>
-                        </div>
-                        <div class="form-group">
-                            <label for="rescue">Rescue Organization</label>
-                            <select id="rescue" required>
-                                <!-- Populated dynamically -->
-                            </select>
-                        </div>
-                    </div>
-
-                    <div class="form-row-3">
-                        <div class="form-group">
-                            <label for="kids">Good with Kids</label>
-                            <select id="kids" required>
-                                <option value="1">Yes</option>
-                                <option value="0">No</option>
-                                <option value="?">Unknown</option>
-                            </select>
-                        </div>
-                        <div class="form-group">
-                            <label for="dogs">Good with Dogs</label>
-                            <select id="dogs" required>
-                                <option value="1">Yes</option>
-                                <option value="0">No</option>
-                                <option value="?">Unknown</option>
-                            </select>
-                        </div>
-                        <div class="form-group">
-                            <label for="cats">Good with Cats</label>
-                            <select id="cats" required>
-                                <option value="1">Yes</option>
-                                <option value="0">No</option>
-                                <option value="?">Unknown</option>
-                            </select>
-                        </div>
-                    </div>
-                </form>
-            </div>
-            <div class="modal-footer">
-                <button class="btn btn-danger" onclick="deleteAnimal()">Delete</button>
-                <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
-                <button class="btn btn-primary" onclick="saveAnimal()">Save Changes</button>
-            </div>
-        </div>
-    </div>
-
-    <!-- Select from Site Modal -->
-    <div id="selectFromSiteModal" class="modal-overlay">
-        <div class="modal">
-            <div class="modal-header">
-                <h2>Select Animals from Wagtopia</h2>
-                <button class="modal-close" onclick="closeSelectFromSiteModal()">&times;</button>
-            </div>
-            <div class="modal-body">
-                <div id="animalListContainer">
-                    <div class="loading-spinner">Loading animals from Wagtopia</div>
-                </div>
-            </div>
-            <div class="modal-footer">
-                <button class="btn btn-secondary" onclick="closeSelectFromSiteModal()">Cancel</button>
-                <button class="btn btn-primary" onclick="importSelectedAnimals()" id="importButton" disabled>Import Selected</button>
-            </div>
-        </div>
-    </div>
-
-    <!-- Delete Multiple Modal -->
-    <div id="deleteMultipleModal" class="modal-overlay">
-        <div class="modal">
-            <div class="modal-header">
-                <h2>Delete Multiple Animals</h2>
-                <button class="modal-close" onclick="closeDeleteMultipleModal()">&times;</button>
-            </div>
-            <div class="modal-body">
-                <div class="select-all-container">
-                    <label>
-                        <input type="checkbox" id="deleteSelectAllCheckbox" onchange="toggleDeleteSelectAll()">
-                        Select All
-                    </label>
-                </div>
-                <div id="deleteAnimalGrid" class="delete-animal-grid">
-                    <!-- Animals will be populated here -->
-                </div>
-            </div>
-            <div class="modal-footer">
-                <button class="btn btn-secondary" onclick="closeDeleteMultipleModal()">Cancel</button>
-                <button class="btn btn-danger" onclick="deleteSelectedAnimals()" id="deleteButton" disabled>Delete Selected</button>
-            </div>
-        </div>
-    </div>
-
-    <!-- Print Multiple Modal -->
-    <div id="printMultipleModal" class="modal-overlay">
-        <div class="modal">
-            <div class="modal-header">
-                <h2>Print Multiple Animals</h2>
-                <button class="modal-close" onclick="closePrintMultipleModal()">&times;</button>
-            </div>
-            <div class="modal-body">
-                <div class="select-all-container">
-                    <label>
-                        <input type="checkbox" id="printSelectAllCheckbox" onchange="togglePrintSelectAll()">
-                        Select All
-                    </label>
-                </div>
-                <div id="printAnimalGrid" class="delete-animal-grid">
-                    <!-- Animals will be populated here -->
-                </div>
-            </div>
-            <div class="modal-footer">
-                <button class="btn btn-secondary" onclick="closePrintMultipleModal()">Cancel</button>
-                <button class="btn btn-primary" onclick="printSelectedAnimals()" id="printButton" disabled>Print Selected</button>
-            </div>
-        </div>
-    </div>
-
-    <!-- Print Settings Dialog Modal -->
-    <div id="printSettingsModal" class="modal-overlay">
-        <div class="modal" style="max-width: 500px;">
-            <div class="modal-header">
-                <h2>Print Settings</h2>
-                <button class="modal-close" onclick="closePrintSettingsModal()">&times;</button>
-            </div>
-            <div class="modal-body">
-                <div id="printPreviewContainer" class="print-preview-container">
-                    <img id="printPreviewImage" class="print-preview-image" src="" alt="Print preview">
-                </div>
-
-                <div class="printer-row">
-                    <div class="form-group">
-                        <label for="printerSelect">Printer</label>
-                        <select id="printerSelect" onchange="onPrinterChange()">
-                            <option value="">Loading printers...</option>
-                        </select>
-                    </div>
-                    <button type="button" class="btn btn-icon" onclick="refreshPrinters()" title="Refresh printers">
-                        <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
-                            <path d="M13.65 2.35A8 8 0 1 0 16 8h-2a6 6 0 1 1-1.76-4.24L10 6h6V0l-2.35 2.35z"/>
-                        </svg>
-                    </button>
-                </div>
-
-                <div class="profile-row">
-                    <div class="form-group">
-                        <label for="printProfileSelect">Profile</label>
-                        <select id="printProfileSelect" onchange="onProfileChange()">
-                            <option value="">No profile selected</option>
-                        </select>
-                    </div>
-                    <div class="profile-buttons">
-                        <button type="button" class="btn btn-secondary" onclick="openSaveProfileDialog()">Save</button>
-                        <button type="button" class="btn btn-secondary" onclick="openManageProfilesModal()">Manage</button>
-                    </div>
-                </div>
-
-                <div class="form-row">
-                    <div class="form-group">
-                        <label for="copiesInput">Copies</label>
-                        <input type="number" id="copiesInput" min="1" max="99" value="1">
-                    </div>
-                    <div class="form-group">
-                        <label for="paperSizeSelect">Paper Size</label>
-                        <select id="paperSizeSelect">
-                            <option value="letter" selected>Letter (8.5 x 11 in)</option>
-                            <option value="legal">Legal (8.5 x 14 in)</option>
-                            <option value="A4">A4 (210 x 297 mm)</option>
-                            <option value="A5">A5 (148 x 210 mm)</option>
-                        </select>
-                    </div>
-                </div>
-
-                <div class="form-group">
-                    <label for="orientationSelect">Orientation</label>
-                    <div class="orientation-options">
-                        <label class="orientation-option">
-                            <input type="radio" name="orientation" value="landscape" checked>
-                            <span class="orientation-icon orientation-landscape"></span>
-                            <span>Landscape</span>
-                        </label>
-                        <label class="orientation-option">
-                            <input type="radio" name="orientation" value="portrait">
-                            <span class="orientation-icon orientation-portrait"></span>
-                            <span>Portrait</span>
-                        </label>
-                    </div>
-                </div>
-
-                <div class="form-group">
-                    <label for="paperSourceSelect">Paper Source</label>
-                    <select id="paperSourceSelect">
-                        <option value="default" selected>Default</option>
-                        <option value="rear">Rear Tray</option>
-                    </select>
-                </div>
-
-                <div id="printerStatus" class="printer-status"></div>
-            </div>
-            <div class="modal-footer">
-                <button class="btn btn-secondary" onclick="closePrintSettingsModal()">Cancel</button>
-                <button class="btn btn-primary" onclick="confirmPrint()" id="confirmPrintButton">Print</button>
-            </div>
-        </div>
-    </div>
-
-    <!-- Manage Print Profiles Modal -->
-    <div id="manageProfilesModal" class="modal-overlay">
-        <div class="modal" style="max-width: 550px;">
-            <div class="modal-header">
-                <h2>Manage Print Profiles</h2>
-                <button class="modal-close" onclick="closeManageProfilesModal()">&times;</button>
-            </div>
-            <div class="modal-body">
-                <div class="form-group">
-                    <label for="manageProfilesPrinterSelect">Printer</label>
-                    <select id="manageProfilesPrinterSelect" onchange="loadProfilesForManagement()">
-                        <option value="">Select a printer...</option>
-                    </select>
-                </div>
-
-                <div id="profileListContainer">
-                    <div class="profile-list" id="profileList">
-                        <div class="profile-empty">Select a printer to view profiles</div>
-                    </div>
-                </div>
-
-                <button type="button" class="btn btn-primary" onclick="openSaveProfileDialogFromManage()" id="addNewProfileBtn" style="display: none;">
-                    + New Profile
-                </button>
-            </div>
-            <div class="modal-footer">
-                <button class="btn btn-secondary" onclick="closeManageProfilesModal()">Close</button>
-            </div>
-        </div>
-    </div>
-
-    <!-- Save/Edit Profile Dialog -->
-    <div id="saveProfileModal" class="modal-overlay">
-        <div class="modal" style="max-width: 450px;">
-            <div class="modal-header">
-                <h2 id="saveProfileTitle">Save Print Profile</h2>
-                <button class="modal-close" onclick="closeSaveProfileDialog()">&times;</button>
-            </div>
-            <div class="modal-body">
-                <input type="hidden" id="editProfileId" value="">
-                <input type="hidden" id="saveProfilePrinterName" value="">
-
-                <div class="form-group">
-                    <label for="profileNameInput">Profile Name</label>
-                    <input type="text" id="profileNameInput" placeholder="e.g., Photo Paper - High Quality">
-                </div>
-
-                <div class="form-row">
-                    <div class="form-group">
-                        <label for="saveProfileCopies">Copies</label>
-                        <input type="number" id="saveProfileCopies" min="1" max="99" value="1">
-                    </div>
-                    <div class="form-group">
-                        <label for="saveProfilePaperSize">Paper Size</label>
-                        <select id="saveProfilePaperSize">
-                            <option value="letter" selected>Letter (8.5 x 11 in)</option>
-                            <option value="legal">Legal (8.5 x 14 in)</option>
-                            <option value="A4">A4 (210 x 297 mm)</option>
-                            <option value="A5">A5 (148 x 210 mm)</option>
-                        </select>
-                    </div>
-                </div>
-
-                <div class="form-row">
-                    <div class="form-group">
-                        <label>Orientation</label>
-                        <div class="orientation-options">
-                            <label class="orientation-option">
-                                <input type="radio" name="saveProfileOrientation" value="landscape" checked>
-                                <span>Landscape</span>
-                            </label>
-                            <label class="orientation-option">
-                                <input type="radio" name="saveProfileOrientation" value="portrait">
-                                <span>Portrait</span>
-                            </label>
-                        </div>
-                    </div>
-                    <div class="form-group">
-                        <label for="saveProfilePaperSource">Paper Source</label>
-                        <select id="saveProfilePaperSource">
-                            <option value="default" selected>Default</option>
-                            <option value="rear">Rear Tray</option>
-                        </select>
-                    </div>
-                </div>
-
-                <div class="calibration-section">
-                    <div class="calibration-header">
-                        <h4>Print Calibration</h4>
-                        <span id="calibrationStatus" class="calibration-status not-calibrated">Not Calibrated</span>
-                    </div>
-
-                    <div class="calibration-diagram">
-                        <svg viewBox="0 0 120 120" xmlns="http://www.w3.org/2000/svg">
-                            <rect x="20" y="20" width="80" height="80" fill="none" stroke="#ccc" stroke-width="1"/>
-                            <circle cx="20" cy="20" r="5" fill="#333"/>
-                            <circle cx="100" cy="20" r="5" fill="#333"/>
-                            <circle cx="100" cy="100" r="5" fill="#333"/>
-                            <circle cx="20" cy="100" r="5" fill="#333"/>
-                            <text x="15" y="12" font-size="10" fill="#333">A</text>
-                            <text x="98" y="12" font-size="10" fill="#333">B</text>
-                            <text x="105" y="105" font-size="10" fill="#333">C</text>
-                            <text x="8" y="105" font-size="10" fill="#333">D</text>
-                            <text x="50" y="15" font-size="8" fill="#666">A-B</text>
-                            <text x="103" y="65" font-size="8" fill="#666">B-C</text>
-                            <text x="50" y="115" font-size="8" fill="#666">C-D</text>
-                            <text x="2" y="65" font-size="8" fill="#666">D-A</text>
-                        </svg>
-                    </div>
-
-                    <button type="button" class="btn btn-secondary" onclick="printCalibrationPage()" style="width: 100%; margin-bottom: 10px;">
-                        Print Calibration Test Page
-                    </button>
-
-                    <p class="calibration-help">
-                        Print the test page, measure the distances between dots (in mm), and enter them below.
-                        Expected distance: <span id="expectedDistanceDisplay">100</span>mm
-                    </p>
-
-                    <div class="calibration-inputs">
-                        <div class="calibration-input-group">
-                            <label>A-B:</label>
-                            <input type="number" id="calibrationAB" step="0.1" min="0" placeholder="100">
-                            <span>mm</span>
-                        </div>
-                        <div class="calibration-input-group">
-                            <label>B-C:</label>
-                            <input type="number" id="calibrationBC" step="0.1" min="0" placeholder="100">
-                            <span>mm</span>
-                        </div>
-                        <div class="calibration-input-group">
-                            <label>C-D:</label>
-                            <input type="number" id="calibrationCD" step="0.1" min="0" placeholder="100">
-                            <span>mm</span>
-                        </div>
-                        <div class="calibration-input-group">
-                            <label>D-A:</label>
-                            <input type="number" id="calibrationDA" step="0.1" min="0" placeholder="100">
-                            <span>mm</span>
-                        </div>
-                    </div>
-
-                    <h5 style="margin-top: 15px; margin-bottom: 8px; font-size: 0.9rem; color: #333;">Border Calibration</h5>
-                    <p class="calibration-help" style="margin-top: 0; margin-bottom: 10px;">
-                        Measure the white space from paper edge to the black border on each side (in mm).
-                        Expected: <span id="expectedBorderDisplay">5</span>mm. If perfect, each side shows 5mm of white space.
-                    </p>
-
-                    <div class="calibration-inputs">
-                        <div class="calibration-input-group">
-                            <label>Top:</label>
-                            <input type="number" id="borderTop" step="0.1" min="0" placeholder="0">
-                            <span>mm</span>
-                        </div>
-                        <div class="calibration-input-group">
-                            <label>Right:</label>
-                            <input type="number" id="borderRight" step="0.1" min="0" placeholder="0">
-                            <span>mm</span>
-                        </div>
-                        <div class="calibration-input-group">
-                            <label>Bottom:</label>
-                            <input type="number" id="borderBottom" step="0.1" min="0" placeholder="0">
-                            <span>mm</span>
-                        </div>
-                        <div class="calibration-input-group">
-                            <label>Left:</label>
-                            <input type="number" id="borderLeft" step="0.1" min="0" placeholder="0">
-                            <span>mm</span>
-                        </div>
-                    </div>
-
-                    <button type="button" class="btn btn-secondary" onclick="clearCalibration()" style="width: 100%; margin-top: 10px;">
-                        Clear Calibration
-                    </button>
-                </div>
-
-                <label class="checkbox-option">
-                    <input type="checkbox" id="setAsDefaultCheckbox">
-                    <span>Set as default for this printer</span>
-                </label>
-            </div>
-            <div class="modal-footer">
-                <button class="btn btn-secondary" onclick="closeSaveProfileDialog()">Cancel</button>
-                <button class="btn btn-primary" onclick="saveProfile()">Save Profile</button>
-            </div>
-        </div>
-    </div>
-
-    <!-- Manage Rescues Modal -->
-    <div id="manageRescuesModal" class="modal-overlay">
-        <div class="modal" style="max-width: 600px;">
-            <div class="modal-header">
-                <h2>Manage Rescue Organizations</h2>
-                <button class="modal-close" onclick="closeManageRescuesModal()">&times;</button>
-            </div>
-            <div class="modal-body">
-                <div id="rescueListContainer">
-                    <div class="profile-list" id="rescueList">
-                        <div class="profile-empty">Loading rescues...</div>
-                    </div>
-                </div>
-
-                <button type="button" class="btn btn-primary" onclick="openAddRescueModal()" style="width: 100%; margin-top: 15px;">
-                    + Add New Rescue
-                </button>
-            </div>
-            <div class="modal-footer">
-                <button class="btn btn-secondary" onclick="closeManageRescuesModal()">Close</button>
-            </div>
-        </div>
-    </div>
-
-    <!-- Add/Edit Rescue Modal -->
-    <div id="editRescueModal" class="modal-overlay">
-        <div class="modal" style="max-width: 500px;">
-            <div class="modal-header">
-                <h2 id="editRescueTitle">Add Rescue Organization</h2>
-                <button class="modal-close" onclick="closeEditRescueModal()">&times;</button>
-            </div>
-            <div class="modal-body">
-                <input type="hidden" id="editRescueId" value="">
-
-                <input type="file" id="rescueLogoInput" accept="image/jpeg,image/jpg,image/png,image/gif,image/webp" style="display: none;" onchange="handleRescueLogoSelected(event)">
-                <div class="modal-image-container" onclick="document.getElementById('rescueLogoInput').click()" style="margin-bottom: 20px;">
-                    <img id="rescueLogoPreview" class="modal-image" src="" alt="" style="display: none; max-height: 120px; object-fit: contain;">
-                    <div id="rescueLogoNoImage" class="modal-no-image" style="height: 120px; font-size: 2rem;">Logo</div>
-                    <div class="image-overlay">
-                        <div class="image-overlay-text">
-                            <span>📷</span>
-                            Click to set logo
-                        </div>
-                    </div>
-                </div>
-
-                <div class="form-group">
-                    <label for="rescueNameInput">Name *</label>
-                    <input type="text" id="rescueNameInput" placeholder="e.g., Happy Tails Rescue" required>
-                </div>
-
-                <div class="form-group">
-                    <label for="rescueWebsiteInput">Website</label>
-                    <input type="text" id="rescueWebsiteInput" placeholder="e.g., https://example.com">
-                </div>
-
-                <div class="form-row">
-                    <div class="form-group">
-                        <label for="rescueOrgIdInput">Organization ID</label>
-                        <input type="text" id="rescueOrgIdInput" placeholder="For scraper (optional)">
-                    </div>
-                    <div class="form-group">
-                        <label for="rescueScraperTypeSelect">Scraper Type</label>
-                        <select id="rescueScraperTypeSelect">
-                            <option value="">None</option>
-                            <option value="wagtopia">Wagtopia</option>
-                            <option value="adoptapet">Adoptapet</option>
-                        </select>
-                    </div>
-                </div>
-            </div>
-            <div class="modal-footer">
-                <button class="btn btn-danger" onclick="deleteCurrentRescue()" id="deleteRescueBtn" style="display: none;">Delete</button>
-                <button class="btn btn-secondary" onclick="closeEditRescueModal()">Cancel</button>
-                <button class="btn btn-primary" onclick="saveRescue()">Save Rescue</button>
-            </div>
-        </div>
-    </div>
-
-    <script src="js/neutralino.js"></script>
     <script src="js/app.js"></script>
 </body>
 </html>

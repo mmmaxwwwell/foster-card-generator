@@ -1,218 +1,69 @@
-// Logging system - declare early to avoid TDZ issues if requires fail
-const logMessages = [];
-let loggingReady = false;
-let LOG_DIR = null;
-let LOG_FILE = null;
-let TMP_DIR = null;
+// Foster Card Generator - Preact + HTM Application
+// Recreated from vanilla JS with modern component architecture
 
-// Node.js modules for Electron
+const { h, render, createContext } = preact;
+const { useState, useEffect, useCallback, useContext, useRef, useMemo } = preactHooks;
+const html = htm.bind(h);
+
+// ============================================================
+// Node.js / Electron imports
+// ============================================================
 const fs = require('fs');
 const path = require('path');
-
-// Database module
 const db = require('../db.js');
+const { ipcRenderer } = require('electron');
+const Handlebars = require('handlebars');
+const QRCode = require('qrcode');
 
-// Import card generation functions directly (no need to spawn subprocess)
+// Card generation functions
 let generateCardFront = null;
 let generateCardBack = null;
+let generateFromTemplate = null;
 try {
     const cardGen = require('../generate-card-cli.js');
-    console.log('[App] cardGen module loaded:', cardGen);
-    console.log('[App] cardGen keys:', Object.keys(cardGen));
-    console.log('[App] generateCardBack type:', typeof cardGen.generateCardBack);
     generateCardFront = cardGen.generateCardFront;
     generateCardBack = cardGen.generateCardBack;
+    generateFromTemplate = cardGen.generateFromTemplate;
 } catch (err) {
     console.error('[App] Failed to load card generation module:', err.message);
-    console.error('[App] Full error:', err);
-    console.error('[App] Stack:', err.stack);
 }
 
-// Use IPC to call scraper in main process (puppeteer doesn't work well in renderer)
-const { ipcRenderer } = require('electron');
-
-// Current selected rescue target
-let selectedRescue = 'wagtopia'; // 'wagtopia' or 'adoptapet'
-
-async function scrapeAnimalPageWagtopia(url) {
-    const result = await ipcRenderer.invoke('scrape-animal-page-wagtopia', url);
-    if (!result.success) {
-        throw new Error(result.error);
-    }
-    return result.data;
-}
-
-async function scrapeAnimalPageAdoptapet(url) {
-    const result = await ipcRenderer.invoke('scrape-animal-page-adoptapet', url);
-    if (!result.success) {
-        throw new Error(result.error);
-    }
-    return result.data;
-}
-
-async function scrapeAnimalPage(url) {
-    if (selectedRescue === 'adoptapet') {
-        return scrapeAnimalPageAdoptapet(url);
-    }
-    return scrapeAnimalPageWagtopia(url);
-}
-
-// App path (equivalent to NL_PATH)
+// ============================================================
+// Constants and Paths
+// ============================================================
 const APP_PATH = path.join(__dirname, '..', '..');
+let DB_DIR = null;
+let DB_PATH = null;
+let LOG_DIR = null;
+let LOG_FILE = null;
 
-async function writeToLogFile(message) {
-    // Don't try to write until LOG_FILE is set and directory exists
-    if (!loggingReady || !LOG_FILE) {
-        return;
-    }
-
-    try {
-        const timestamp = new Date().toISOString();
-        const logLine = `[${timestamp}] ${message}\n`;
-
-        // Try to append to the log file
-        let content = '';
-        try {
-            content = fs.readFileSync(LOG_FILE, 'utf8');
-        } catch (e) {
-            // File doesn't exist yet
-        }
-
-        fs.writeFileSync(LOG_FILE, content + logLine);
-    } catch (err) {
-        // Silently fail - can't do much if logging fails
-        console.error('Log write failed:', err);
-    }
-}
+// ============================================================
+// Logging
+// ============================================================
+const logMessages = [];
+let loggingReady = false;
 
 function log(...args) {
     const message = args.map(arg =>
         typeof arg === 'object' ? JSON.stringify(arg, null, 2) : String(arg)
     ).join(' ');
-
-    // Store in memory with timestamp
     const timestamp = new Date().toISOString();
     logMessages.push(`[${timestamp}] ${message}`);
-
-    // Try to write to file
-    writeToLogFile(message);
-
-    // Also log to console
+    if (loggingReady && LOG_FILE) {
+        try {
+            let content = '';
+            try { content = fs.readFileSync(LOG_FILE, 'utf8'); } catch (e) {}
+            fs.writeFileSync(LOG_FILE, content + `[${timestamp}] ${message}\n`);
+        } catch (err) {
+            console.error('Log write failed:', err);
+        }
+    }
     console.log(...args);
 }
 
-// Function to open log file in system editor
-async function openLogFile() {
-    try {
-        log('[App] Opening log file:', LOG_FILE);
-
-        // Try to open with default text editor
-        exec(`xdg-open "${LOG_FILE}"`, {});
-        showToast('Opening log file...');
-    } catch (err) {
-        console.error('[App] Failed to open log file:', err);
-
-        // Fallback: show logs in alert
-        const recentLogs = logMessages.slice(-50).join('\n');
-        alert('Log file location: ' + LOG_FILE + '\n\nRecent logs:\n\n' + recentLogs);
-    }
-}
-
-// Debug Modal functions
-function openDebugModal() {
-    document.getElementById('debugModal').classList.add('active');
-}
-
-function closeDebugModal() {
-    document.getElementById('debugModal').classList.remove('active');
-}
-
-// Delete database and reload app (for recovery from corrupted database)
-async function deleteDatabaseAndReload() {
-    if (!confirm('Are you sure you want to delete the database? This will remove all your animals and settings. The app will reload with a fresh database.')) {
-        return;
-    }
-
-    try {
-        const result = await ipcRenderer.invoke('delete-database-and-reload');
-        if (!result.success) {
-            alert('Failed to delete database: ' + result.error);
-        }
-        // App will reload automatically if successful
-    } catch (err) {
-        alert('Error: ' + err.message);
-    }
-}
-
-// Paths derived from database module
-let DB_DIR = null;
-let DB_PATH = null;
-
-// Setup paths - initialize database and logging
-async function setupPaths() {
-    log('[App] ========== INITIALIZING APPLICATION ==========');
-
-    try {
-        // Initialize database (this also creates directories)
-        const { dbDir, dbPath } = await db.initializeAsync();
-        DB_DIR = dbDir;
-        DB_PATH = dbPath;
-
-        log('[App] Database initialized at:', DB_PATH);
-
-        // Setup logging paths
-        LOG_DIR = DB_DIR;
-        LOG_FILE = path.join(DB_DIR, 'app.log');
-        TMP_DIR = path.join(DB_DIR, 'tmp');
-
-        // Create tmp directory
-        fs.mkdirSync(TMP_DIR, { recursive: true });
-
-        log('[App] LOG_FILE set to:', LOG_FILE);
-
-        // Enable file logging now that paths are set
-        loggingReady = true;
-        log('[App] Logging to file enabled');
-
-        // Update UI
-        const subtitle = document.getElementById('subtitle');
-        if (subtitle) {
-            subtitle.textContent = `Data directory: ${DB_DIR}`;
-            subtitle.style.fontSize = '12px';
-            subtitle.style.color = '#fff';
-        }
-
-        const logPathEl = document.getElementById('log-path');
-        if (logPathEl) {
-            logPathEl.innerHTML = `
-                <strong>📁 Debug Information</strong><br>
-                <div style="margin: 10px 0; padding: 10px; background: rgba(255,255,255,0.1); border-radius: 6px;">
-                    <strong>Database:</strong><br>
-                    <code style="background: rgba(0,0,0,0.3); padding: 4px 8px; border-radius: 4px; font-size: 11px;">${DB_PATH}</code><br><br>
-                    <strong>Log file:</strong><br>
-                    <code style="background: rgba(0,0,0,0.3); padding: 4px 8px; border-radius: 4px; font-size: 11px;">${LOG_FILE}</code><br><br>
-                    <small style="opacity: 0.8;">To view logs in terminal: <code>tail -f ${LOG_FILE}</code></small>
-                </div>
-            `;
-        }
-    } catch (err) {
-        log('[App] FATAL ERROR:', err.message);
-        throw err;
-    }
-
-    log('[App] ========== PATHS CONFIGURED ==========');
-    log('[App] DB_PATH:', DB_PATH);
-    log('[App] LOG_FILE:', LOG_FILE);
-    log('[App] ========================================');
-}
-
-let animals = [];
-let rescues = []; // Cache of rescue organizations
-let currentAnimal = null;
-let pendingImageData = null; // Stores new image data before save
-let newAnimalImageData = null; // Stores image data for new animal
-
-
+// ============================================================
+// Utility Functions
+// ============================================================
 function formatCompatibility(value) {
     if (value === '1' || value === 1 || value === true) {
         return { text: 'Yes', class: 'compat-yes' };
@@ -223,56 +74,567 @@ function formatCompatibility(value) {
     return { text: '?', class: 'compat-unknown' };
 }
 
-function showToast(message, type = 'success') {
-    const existing = document.querySelector('.toast');
-    if (existing) existing.remove();
-
-    const toast = document.createElement('div');
-    toast.className = `toast toast-${type}`;
-    toast.textContent = message;
-    document.body.appendChild(toast);
-
-    setTimeout(() => toast.remove(), 3000);
+function getPaperSizeLabel(size) {
+    const labels = {
+        'letter': 'Letter (8.5 x 11 in)',
+        'legal': 'Legal (8.5 x 14 in)',
+        'A4': 'A4 (210 x 297 mm)',
+        'A5': 'A5 (148 x 210 mm)'
+    };
+    return labels[size] || size;
 }
 
-function renderAnimalCard(animal, rescue) {
+function capitalizeFirst(str) {
+    if (!str) return '';
+    return str.charAt(0).toUpperCase() + str.slice(1);
+}
+
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+async function fileToImageData(file) {
+    const arrayBuffer = await file.arrayBuffer();
+    const uint8Array = new Uint8Array(arrayBuffer);
+    let hexString = '';
+    for (let i = 0; i < uint8Array.length; i++) {
+        hexString += uint8Array[i].toString(16).padStart(2, '0');
+    }
+    let binary = '';
+    for (let i = 0; i < uint8Array.length; i++) {
+        binary += String.fromCharCode(uint8Array[i]);
+    }
+    const base64 = btoa(binary);
+    return {
+        hex: hexString,
+        mime: file.type || 'image/jpeg',
+        path: file.name,
+        dataUrl: `data:${file.type};base64,${base64}`
+    };
+}
+
+function bufferToImageData(buffer, filePath) {
+    const ext = filePath.split('.').pop().toLowerCase();
+    const mimeTypes = {
+        'jpg': 'image/jpeg', 'jpeg': 'image/jpeg', 'png': 'image/png',
+        'gif': 'image/gif', 'webp': 'image/webp'
+    };
+    const mime = mimeTypes[ext] || 'image/jpeg';
+    let hexString = '';
+    for (let i = 0; i < buffer.length; i++) {
+        hexString += buffer[i].toString(16).padStart(2, '0');
+    }
+    const base64 = buffer.toString('base64');
+    return {
+        hex: hexString,
+        mime: mime,
+        path: path.basename(filePath),
+        dataUrl: `data:${mime};base64,${base64}`
+    };
+}
+
+function getRescueLogoDataUrl(rescue) {
+    if (!rescue) return null;
+    if (rescue.logo_data) {
+        const mimeType = rescue.logo_mime || (rescue.logo_path?.endsWith('.png') ? 'image/png' : 'image/jpeg');
+        const base64 = Buffer.from(rescue.logo_data).toString('base64');
+        return `data:${mimeType};base64,${base64}`;
+    }
+    return null;
+}
+
+// ============================================================
+// CodeMirror Editor Component (using CodeMirror 5)
+// ============================================================
+function CodeMirrorEditor({ value, onChange, language, disabled }) {
+    const containerRef = useRef(null);
+    const editorRef = useRef(null);
+    const onChangeRef = useRef(onChange);
+    const isUpdatingRef = useRef(false);
+
+    // Keep onChange ref up to date
+    useEffect(() => {
+        onChangeRef.current = onChange;
+    }, [onChange]);
+
+    // Initialize editor
+    useEffect(() => {
+        if (!containerRef.current || !window.CodeMirror) return;
+
+        // Destroy existing editor if any
+        if (editorRef.current) {
+            editorRef.current.toTextArea();
+            editorRef.current = null;
+        }
+
+        // Create a textarea for CodeMirror to enhance
+        const textarea = document.createElement('textarea');
+        textarea.value = value || '';
+        containerRef.current.innerHTML = '';
+        containerRef.current.appendChild(textarea);
+
+        // Determine mode based on language
+        let mode = 'htmlmixed';
+        if (language === 'json') {
+            mode = { name: 'javascript', json: true };
+        }
+
+        const editor = CodeMirror.fromTextArea(textarea, {
+            mode: mode,
+            theme: 'default',
+            lineNumbers: true,
+            lineWrapping: true,
+            readOnly: disabled,
+            autoCloseBrackets: true,
+            autoCloseTags: language === 'html',
+            foldGutter: true,
+            gutters: ['CodeMirror-linenumbers', 'CodeMirror-foldgutter'],
+            extraKeys: {
+                'Ctrl-Space': function(cm) {
+                    if (language === 'html') {
+                        CodeMirror.showHint(cm, CodeMirror.hint.handlebars, { completeSingle: false });
+                    }
+                },
+                'Tab': function(cm) {
+                    if (cm.somethingSelected()) {
+                        cm.indentSelection('add');
+                    } else {
+                        cm.replaceSelection('    ', 'end');
+                    }
+                }
+            }
+        });
+
+        // Handle changes
+        editor.on('change', () => {
+            if (!isUpdatingRef.current && onChangeRef.current) {
+                onChangeRef.current(editor.getValue());
+            }
+        });
+
+        // Show Handlebars hints when typing {{
+        if (language === 'html') {
+            editor.on('inputRead', (cm, change) => {
+                if (change.text[0] === '{' && change.origin === '+input') {
+                    const cur = cm.getCursor();
+                    const line = cm.getLine(cur.line);
+                    if (cur.ch >= 2 && line.slice(cur.ch - 2, cur.ch) === '{{') {
+                        CodeMirror.showHint(cm, CodeMirror.hint.handlebars, { completeSingle: false });
+                    }
+                }
+            });
+        }
+
+        editorRef.current = editor;
+
+        // Refresh after a short delay to ensure proper sizing
+        setTimeout(() => {
+            if (editorRef.current) {
+                editorRef.current.refresh();
+            }
+        }, 100);
+
+        return () => {
+            if (editorRef.current) {
+                editorRef.current.toTextArea();
+                editorRef.current = null;
+            }
+        };
+    }, [language, disabled]);
+
+    // Update editor content when value prop changes externally
+    useEffect(() => {
+        if (!editorRef.current) return;
+        const currentValue = editorRef.current.getValue();
+        if (value !== currentValue) {
+            isUpdatingRef.current = true;
+            const cursor = editorRef.current.getCursor();
+            editorRef.current.setValue(value || '');
+            editorRef.current.setCursor(cursor);
+            isUpdatingRef.current = false;
+        }
+    }, [value]);
+
+    return html`
+        <div
+            ref=${containerRef}
+            class="codemirror-container"
+        />
+    `;
+}
+
+// ============================================================
+// Context Providers
+// ============================================================
+const AppContext = createContext(null);
+const ToastContext = createContext(null);
+const ModalContext = createContext(null);
+
+// ============================================================
+// Toast Component
+// ============================================================
+function Toast({ message, type, onDismiss }) {
+    useEffect(() => {
+        const timer = setTimeout(onDismiss, 3000);
+        return () => clearTimeout(timer);
+    }, [onDismiss]);
+
+    return html`
+        <div class="toast toast-${type}">
+            ${message}
+        </div>
+    `;
+}
+
+function ToastProvider({ children }) {
+    const [toasts, setToasts] = useState([]);
+
+    const showToast = useCallback((message, type = 'success') => {
+        const id = Date.now();
+        setToasts(prev => [...prev, { id, message, type }]);
+    }, []);
+
+    const dismissToast = useCallback((id) => {
+        setToasts(prev => prev.filter(t => t.id !== id));
+    }, []);
+
+    return html`
+        <${ToastContext.Provider} value=${showToast}>
+            ${children}
+            <div class="toast-container">
+                ${toasts.map(t => html`
+                    <${Toast}
+                        key=${t.id}
+                        message=${t.message}
+                        type=${t.type}
+                        onDismiss=${() => dismissToast(t.id)}
+                    />
+                `)}
+            </div>
+        <//>
+    `;
+}
+
+function useToast() {
+    return useContext(ToastContext);
+}
+
+// ============================================================
+// Modal Component
+// ============================================================
+function Modal({ isOpen, onClose, title, children, footer, width = '600px' }) {
+    useEffect(() => {
+        const handleEscape = (e) => {
+            if (e.key === 'Escape' && isOpen) onClose();
+        };
+        document.addEventListener('keydown', handleEscape);
+        return () => document.removeEventListener('keydown', handleEscape);
+    }, [isOpen, onClose]);
+
+    if (!isOpen) return null;
+
+    const handleOverlayClick = (e) => {
+        if (e.target.classList.contains('modal-overlay')) onClose();
+    };
+
+    return html`
+        <div class="modal-overlay active" onClick=${handleOverlayClick}>
+            <div class="modal" style="max-width: ${width}">
+                ${title && html`
+                    <div class="modal-header">
+                        <h2>${title}</h2>
+                        <button class="modal-close" onClick=${onClose}>×</button>
+                    </div>
+                `}
+                <div class="modal-body">
+                    ${children}
+                </div>
+                ${footer && html`
+                    <div class="modal-footer">
+                        ${footer}
+                    </div>
+                `}
+            </div>
+        </div>
+    `;
+}
+
+// ============================================================
+// Image Upload Component
+// ============================================================
+function ImageUpload({ imageUrl, onImageChange, placeholder = '🐕', onAIEdit }) {
+    const inputRef = useRef(null);
+
+    const handleUploadClick = (e) => {
+        e.stopPropagation();
+        inputRef.current?.click();
+    };
+
+    const handleAIEditClick = (e) => {
+        e.stopPropagation();
+        if (onAIEdit && imageUrl) {
+            onAIEdit();
+        }
+    };
+
+    const handleChange = async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        try {
+            const imageData = await fileToImageData(file);
+            onImageChange(imageData);
+        } catch (err) {
+            console.error('Error loading image:', err);
+        }
+    };
+
+    return html`
+        <input
+            type="file"
+            ref=${inputRef}
+            accept="image/jpeg,image/jpg,image/png,image/gif,image/webp"
+            style="display: none;"
+            onChange=${handleChange}
+        />
+        <div class="modal-image-container">
+            ${imageUrl
+                ? html`<img class="modal-image" src=${imageUrl} alt="Preview" />`
+                : html`<div class="modal-no-image">${placeholder}</div>`
+            }
+            <div class="image-overlay">
+                <div class="image-overlay-buttons">
+                    <button class="image-overlay-btn" onClick=${handleUploadClick}>
+                        <span>📷</span>
+                        ${imageUrl ? 'Change Photo' : 'Add Photo'}
+                    </button>
+                    ${imageUrl && onAIEdit && html`
+                        <button class="image-overlay-btn" onClick=${handleAIEditClick}>
+                            <span>🪄</span>
+                            Edit with AI
+                        </button>
+                    `}
+                </div>
+            </div>
+        </div>
+    `;
+}
+
+// ============================================================
+// AI Edit Image Modal
+// ============================================================
+function AIEditImageModal({ isOpen, onClose, imageUrl, onSave }) {
+    const [prompt, setPrompt] = useState('');
+    const [generating, setGenerating] = useState(false);
+    const [editedImageUrl, setEditedImageUrl] = useState(null);
+    const showToast = useToast();
+
+    useEffect(() => {
+        if (!isOpen) {
+            setPrompt('');
+            setEditedImageUrl(null);
+            setGenerating(false);
+        }
+    }, [isOpen]);
+
+    const handleGenerate = async () => {
+        if (!prompt.trim()) {
+            showToast('Please enter a description of how you want to change the picture.', 'error');
+            return;
+        }
+
+        const apiKey = db.getSetting('openai_api_key');
+        if (!apiKey) {
+            showToast('Please set your OpenAI API key in Settings first.', 'error');
+            return;
+        }
+
+        const currentImage = editedImageUrl || imageUrl;
+        if (!currentImage) {
+            showToast('No image to edit.', 'error');
+            return;
+        }
+
+        setGenerating(true);
+        try {
+            // Use gpt-image-1 (GPT-4o native image editing) which can edit images directly
+            const response = await fetch('https://api.openai.com/v1/images/edits', {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${apiKey}`
+                },
+                body: await createImageEditFormData(currentImage, prompt)
+            });
+
+            if (!response.ok) {
+                const errorData = await response.json().catch(() => ({}));
+                throw new Error(errorData.error?.message || `API request failed: ${response.status}`);
+            }
+
+            const data = await response.json();
+            if (data.data && data.data[0]) {
+                let newImageUrl;
+                if (data.data[0].b64_json) {
+                    newImageUrl = `data:image/png;base64,${data.data[0].b64_json}`;
+                } else if (data.data[0].url) {
+                    // Fetch the URL and convert to data URL
+                    const imgResponse = await fetch(data.data[0].url);
+                    const blob = await imgResponse.blob();
+                    const reader = new FileReader();
+                    newImageUrl = await new Promise((resolve) => {
+                        reader.onloadend = () => resolve(reader.result);
+                        reader.readAsDataURL(blob);
+                    });
+                } else {
+                    throw new Error('No image data in response');
+                }
+                setEditedImageUrl(newImageUrl);
+                showToast('Image generated! You can continue editing or save.');
+            } else {
+                throw new Error('No image returned from API');
+            }
+        } catch (err) {
+            showToast(`Error generating image: ${err.message}`, 'error');
+        } finally {
+            setGenerating(false);
+            setPrompt('');
+        }
+    };
+
+    const handleSave = () => {
+        if (editedImageUrl) {
+            onSave(editedImageUrl);
+        }
+        onClose();
+    };
+
+    const displayImage = editedImageUrl || imageUrl;
+
+    const footer = html`
+        <button class="btn btn-secondary" onClick=${onClose}>Cancel</button>
+        <button class="btn btn-primary" onClick=${handleSave} disabled=${!editedImageUrl}>
+            Save Changes
+        </button>
+    `;
+
+    return html`
+        <${Modal} isOpen=${isOpen} onClose=${onClose} title="Edit Image with AI" footer=${footer}>
+            <div class="ai-edit-image-container">
+                ${displayImage
+                    ? html`<img class="ai-edit-preview" src=${displayImage} alt="Preview" />`
+                    : html`<div class="modal-no-image">No image</div>`
+                }
+            </div>
+            <div class="form-group" style="margin-top: 15px;">
+                <label for="ai-prompt">Describe how you want to change the picture:</label>
+                <textarea
+                    id="ai-prompt"
+                    value=${prompt}
+                    onInput=${(e) => setPrompt(e.target.value)}
+                    placeholder="e.g., Make the background a sunny park, remove the leash, make it look more professional..."
+                    rows="3"
+                    style="width: 100%; resize: vertical;"
+                    disabled=${generating}
+                />
+            </div>
+            <button
+                class="btn btn-primary"
+                onClick=${handleGenerate}
+                disabled=${generating || !prompt.trim()}
+                style="width: 100%; margin-top: 10px;"
+            >
+                ${generating ? 'Generating...' : 'Generate'}
+            </button>
+            ${editedImageUrl && html`
+                <p style="margin-top: 10px; color: #666; font-size: 0.9rem; text-align: center;">
+                    You can enter another prompt to continue editing, or save your changes.
+                </p>
+            `}
+        <//>
+    `;
+}
+
+// Helper function to create form data for OpenAI gpt-image-1 edit API
+async function createImageEditFormData(imageDataUrl, prompt) {
+    const formData = new FormData();
+
+    // Convert data URL to blob
+    const response = await fetch(imageDataUrl);
+    const blob = await response.blob();
+
+    // Convert to PNG format (required by the API)
+    const pngBlob = await convertToPng(blob);
+
+    formData.append('model', 'gpt-image-1');
+    formData.append('image', pngBlob, 'image.png');
+    formData.append('prompt', prompt);
+
+    return formData;
+}
+
+// Convert image blob to PNG format using canvas
+async function convertToPng(blob) {
+    return new Promise((resolve, reject) => {
+        const img = new Image();
+        img.onload = () => {
+            const canvas = document.createElement('canvas');
+            canvas.width = img.width;
+            canvas.height = img.height;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(img, 0, 0);
+            canvas.toBlob((pngBlob) => {
+                if (pngBlob) {
+                    resolve(pngBlob);
+                } else {
+                    reject(new Error('Failed to convert image to PNG'));
+                }
+            }, 'image/png');
+        };
+        img.onerror = () => reject(new Error('Failed to load image'));
+        img.src = URL.createObjectURL(blob);
+    });
+}
+
+// ============================================================
+// Form Components
+// ============================================================
+function FormGroup({ label, children, id }) {
+    return html`
+        <div class="form-group">
+            <label for=${id}>${label}</label>
+            ${children}
+        </div>
+    `;
+}
+
+function FormRow({ cols = 2, children }) {
+    const className = cols === 3 ? 'form-row-3' : 'form-row';
+    return html`<div class=${className}>${children}</div>`;
+}
+
+// ============================================================
+// Animal Card Component
+// ============================================================
+function AnimalCard({ animal, rescue, onEdit, onPrintFront, onPrintBack, onPrintFlyer, customTemplates, onPrintWithTemplate }) {
     const kids = formatCompatibility(animal.kids);
     const dogs = formatCompatibility(animal.dogs);
     const cats = formatCompatibility(animal.cats);
+    const logoDataUrl = getRescueLogoDataUrl(rescue);
 
-    // Get logo from database (prefer logo_data blob, fall back to file)
-    let logoDataUrl = null;
-    if (rescue) {
-        if (rescue.logo_data) {
-            // Use logo stored in database
-            const mimeType = rescue.logo_mime || (rescue.logo_path.endsWith('.png') ? 'image/png' : 'image/jpeg');
-            const base64 = Buffer.from(rescue.logo_data).toString('base64');
-            logoDataUrl = `data:${mimeType};base64,${base64}`;
-        } else {
-            // Fallback to file-based logo
-            const srcDir = path.join(__dirname, '..', '..', 'src');
-            const logoPath = path.join(srcDir, rescue.logo_path);
-            if (fs.existsSync(logoPath)) {
-                const mimeType = rescue.logo_path.endsWith('.png') ? 'image/png' : 'image/jpeg';
-                logoDataUrl = `data:${mimeType};base64,${fs.readFileSync(logoPath).toString('base64')}`;
-            }
-        }
-    }
-
-    return `
-        <div class="animal-card" data-id="${animal.id}">
-            <div class="animal-image-container" onclick="openEditModal(${animal.id})">
+    return html`
+        <div class="animal-card" data-id=${animal.id}>
+            <div class="animal-image-container" onClick=${() => onEdit(animal.id)}>
                 ${animal.imageDataUrl
-                    ? `<img class="animal-image" src="${animal.imageDataUrl}" alt="${animal.name}">`
-                    : `<div class="no-image">🐕</div>`
+                    ? html`<img class="animal-image" src=${animal.imageDataUrl} alt=${animal.name} />`
+                    : html`<div class="no-image">🐕</div>`
                 }
-                ${logoDataUrl
-                    ? `<img class="rescue-logo-badge" src="${logoDataUrl}" alt="${rescue.name}" title="${rescue.name}">`
-                    : ''
-                }
+                ${logoDataUrl && html`
+                    <img class="rescue-logo-badge" src=${logoDataUrl} alt=${rescue.name} title=${rescue.name} />
+                `}
             </div>
             <div class="animal-info">
-                <div onclick="openEditModal(${animal.id})" style="cursor: pointer;">
+                <div onClick=${() => onEdit(animal.id)} style="cursor: pointer;">
                     <h2 class="animal-name">${animal.name}</h2>
                     <p class="animal-breed">${animal.breed}</p>
                     <div class="animal-details">
@@ -300,2027 +662,837 @@ function renderAnimalCard(animal, rescue) {
                     </div>
                 </div>
                 <div class="card-actions">
-                    <button class="btn-print-front" onclick="event.stopPropagation(); printCardFront(${animal.id})">Print Front</button>
-                    <button class="btn-print-back" onclick="event.stopPropagation(); printCardBack(${animal.id})">Print Back</button>
+                    <div class="card-actions-section">
+                        <span class="card-actions-label">Cards</span>
+                        <div class="card-actions-buttons">
+                            <button class="btn-print-front" onClick=${(e) => { e.stopPropagation(); onPrintFront(animal.id); }}>
+                                Print Front
+                            </button>
+                            <button class="btn-print-back" onClick=${(e) => { e.stopPropagation(); onPrintBack(animal.id); }}>
+                                Print Back
+                            </button>
+                        </div>
+                    </div>
+                    <button class="btn-print-flyer" onClick=${(e) => { e.stopPropagation(); onPrintFlyer(animal.id); }}>
+                        Print Flyer
+                    </button>
+                    ${customTemplates && customTemplates.length > 0 && html`
+                        <div class="card-actions-section">
+                            <span class="card-actions-label">Custom Templates</span>
+                            <div class="card-actions-buttons custom-template-buttons">
+                                ${customTemplates.map(template => html`
+                                    <button
+                                        key=${template.id}
+                                        class="btn-print-template"
+                                        onClick=${(e) => { e.stopPropagation(); onPrintWithTemplate(animal.id, template.id); }}
+                                        title=${template.description || template.name}
+                                    >
+                                        ${template.name}
+                                    </button>
+                                `)}
+                            </div>
+                        </div>
+                    `}
                 </div>
             </div>
         </div>
     `;
 }
 
-async function loadAnimals() {
-    const content = document.getElementById('content');
-    const subtitle = document.getElementById('subtitle');
+// ============================================================
+// Animal Form Component (shared between Create and Edit)
+// ============================================================
+function AnimalForm({ animal, rescues, imageData, onImageChange, formRef, onAIEdit, includeBio = true }) {
+    const imageUrl = imageData?.dataUrl || animal?.imageDataUrl || null;
 
-    content.innerHTML = '<div class="loading">Loading animals...</div>';
+    return html`
+        <${ImageUpload}
+            imageUrl=${imageUrl}
+            onImageChange=${onImageChange}
+            placeholder="🐕"
+            onAIEdit=${onAIEdit}
+        />
+        <form ref=${formRef}>
+            <${FormRow}>
+                <${FormGroup} label="Name" id="name">
+                    <input type="text" id="name" name="name" defaultValue=${animal?.name || ''} required />
+                <//>
+                <${FormGroup} label="Breed" id="breed">
+                    <input type="text" id="breed" name="breed" defaultValue=${animal?.breed || ''} required />
+                <//>
+            <//>
 
-    // Ensure database is initialized
-    if (!db.isConnected()) {
-        console.log('[App] Database not initialized, running setupPaths...');
-        try {
-            await setupPaths();
-        } catch (err) {
-            console.error('[App] Failed to initialize database:', err);
-            content.innerHTML = `
-                <div class="error">
-                    <h3>Database not initialized</h3>
-                    <p>${err.message}</p>
-                    <p>Please restart the application.</p>
-                </div>
-            `;
-            subtitle.textContent = 'Error: Database not ready';
-            return;
-        }
+            <${FormGroup} label="Adoption URL" id="slug">
+                <input type="text" id="slug" name="slug" defaultValue=${animal?.slug || ''} required />
+            <//>
+
+            <${FormRow}>
+                <${FormGroup} label="Age (Long)" id="ageLong">
+                    <input type="text" id="ageLong" name="age_long" placeholder="e.g., 2 Years" defaultValue=${animal?.age_long || ''} required />
+                <//>
+                <${FormGroup} label="Age (Short)" id="ageShort">
+                    <input type="text" id="ageShort" name="age_short" placeholder="e.g., 2 Yr" defaultValue=${animal?.age_short || ''} required />
+                <//>
+            <//>
+
+            <${FormRow} cols=${3}>
+                <${FormGroup} label="Size" id="size">
+                    <select id="size" name="size" required>
+                        <option value="Small" selected=${(animal?.size || 'Medium') === 'Small'}>Small</option>
+                        <option value="Medium" selected=${(animal?.size || 'Medium') === 'Medium'}>Medium</option>
+                        <option value="Large" selected=${(animal?.size || 'Medium') === 'Large'}>Large</option>
+                    </select>
+                <//>
+                <${FormGroup} label="Gender" id="gender">
+                    <select id="gender" name="gender" required>
+                        <option value="Male" selected=${(animal?.gender || 'Male') === 'Male'}>Male</option>
+                        <option value="Female" selected=${(animal?.gender || 'Male') === 'Female'}>Female</option>
+                        <option value="Neutered(M)" selected=${(animal?.gender || 'Male') === 'Neutered(M)'}>Neutered(M)</option>
+                        <option value="Spayed(F)" selected=${(animal?.gender || 'Male') === 'Spayed(F)'}>Spayed(F)</option>
+                    </select>
+                <//>
+                <${FormGroup} label="Shots" id="shots">
+                    <select id="shots" name="shots" required>
+                        <option value="1" selected=${animal ? !!animal.shots : true}>Yes</option>
+                        <option value="0" selected=${animal ? !animal.shots : false}>No</option>
+                    </select>
+                <//>
+            <//>
+
+            <${FormRow}>
+                <${FormGroup} label="Housetrained" id="housetrained">
+                    <select id="housetrained" name="housetrained" required>
+                        <option value="1" selected=${animal ? !!animal.housetrained : true}>Yes</option>
+                        <option value="0" selected=${animal ? !animal.housetrained : false}>No</option>
+                    </select>
+                <//>
+                <${FormGroup} label="Rescue Organization" id="rescue">
+                    <select id="rescue" name="rescue_id" required>
+                        ${rescues.map(r => html`<option key=${r.id} value=${r.id} selected=${(animal?.rescue_id || rescues[0]?.id) === r.id}>${r.name}</option>`)}
+                    </select>
+                <//>
+            <//>
+
+            <${FormRow} cols=${3}>
+                <${FormGroup} label="Good with Kids" id="kids">
+                    <select id="kids" name="kids" required>
+                        <option value="1" selected=${animal?.kids === 1 || animal?.kids === '1'}>Yes</option>
+                        <option value="0" selected=${animal?.kids === 0 || animal?.kids === '0'}>No</option>
+                        <option value="?" selected=${animal?.kids == null || animal?.kids === '?'}>Unknown</option>
+                    </select>
+                <//>
+                <${FormGroup} label="Good with Dogs" id="dogs">
+                    <select id="dogs" name="dogs" required>
+                        <option value="1" selected=${animal?.dogs === 1 || animal?.dogs === '1'}>Yes</option>
+                        <option value="0" selected=${animal?.dogs === 0 || animal?.dogs === '0'}>No</option>
+                        <option value="?" selected=${animal?.dogs == null || animal?.dogs === '?'}>Unknown</option>
+                    </select>
+                <//>
+                <${FormGroup} label="Good with Cats" id="cats">
+                    <select id="cats" name="cats" required>
+                        <option value="1" selected=${animal?.cats === 1 || animal?.cats === '1'}>Yes</option>
+                        <option value="0" selected=${animal?.cats === 0 || animal?.cats === '0'}>No</option>
+                        <option value="?" selected=${animal?.cats == null || animal?.cats === '?'}>Unknown</option>
+                    </select>
+                <//>
+            <//>
+
+            ${includeBio && html`
+                <${FormGroup} label="Bio" id="bio">
+                    <textarea
+                        id="bio"
+                        name="bio"
+                        rows="4"
+                        placeholder="Enter the animal's bio/description..."
+                        style="resize: vertical; min-height: 80px;"
+                    >${animal?.bio || ''}</textarea>
+                <//>
+            `}
+        </form>
+    `;
+}
+
+function getFormData(formRef, includeBio = true) {
+    const form = formRef.current;
+    if (!form) return null;
+    const data = {
+        name: form.name.value,
+        breed: form.breed.value,
+        slug: form.slug.value,
+        age_long: form.age_long.value,
+        age_short: form.age_short.value,
+        size: form.size.value,
+        gender: form.gender.value,
+        shots: form.shots.value === '1',
+        housetrained: form.housetrained.value === '1',
+        kids: form.kids.value,
+        dogs: form.dogs.value,
+        cats: form.cats.value,
+        rescue_id: parseInt(form.rescue_id.value, 10)
+    };
+    if (includeBio && form.bio) {
+        data.bio = form.bio.value;
     }
+    return data;
+}
 
-    try {
-        // Load rescues for later use
-        rescues = db.getAllRescues();
-        console.log('[App] Loaded', rescues.length, 'rescues');
-
-        // Update rescue dropdowns with dynamic options
-        updateRescueDropdowns();
-
-        animals = db.getAllAnimals();
-
-        if (animals.length === 0) {
-            content.innerHTML = '<div class="loading">No animals found. Create one to get started.</div>';
-            subtitle.textContent = 'No animals in database';
-            return;
-        }
-
-        subtitle.textContent = `${animals.length} animals available for adoption`;
-
-        // Load images for each animal
-        for (const animal of animals) {
-            animal.imageDataUrl = db.getImageAsDataUrl(animal.id);
-        }
-
-        // Render all cards with their rescue info
-        content.innerHTML = `
-            <div class="animals-grid">
-                ${animals.map(animal => {
-                    const rescue = rescues.find(r => r.id === animal.rescue_id);
-                    return renderAnimalCard(animal, rescue);
-                }).join('')}
-            </div>
-        `;
-
-    } catch (err) {
-        console.error('Error loading animals:', err);
-        const dbPathDisplay = DB_PATH || 'Unknown (not initialized)';
-        content.innerHTML = `
-            <div class="error">
-                <h3>Error loading animals</h3>
-                <p>${err.message}</p>
-                <p>Make sure sqlite3 is available and the database exists.</p>
-                <p style="margin-top: 15px; font-size: 12px; color: #666;">
-                    <strong>Database location:</strong><br>
-                    <code style="background: rgba(0,0,0,0.1); padding: 4px 8px; border-radius: 4px; word-break: break-all;">${dbPathDisplay}</code>
-                </p>
-                <button onclick="deleteDatabaseAndReload()" style="margin-top: 15px; padding: 10px 20px; background: #dc3545; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 14px;">
-                    🗑️ Delete Database & Reload
+// ============================================================
+// Create Animal Modal
+// ============================================================
+function CreateOptionsModal({ isOpen, onClose, onSelectManual, onSelectScrape, onSelectFromSite }) {
+    return html`
+        <${Modal} isOpen=${isOpen} onClose=${onClose} title="Create New Animal">
+            <div class="create-options">
+                <button class="option-button" onClick=${onSelectManual}>
+                    <h3>Enter Data</h3>
+                    <p>Manually enter all animal information and details</p>
                 </button>
-                <p style="margin-top: 10px; font-size: 11px; color: #888;">This will delete the corrupted database and create a fresh one.</p>
+                <button class="option-button" onClick=${onSelectScrape}>
+                    <h3>Scrape from URL</h3>
+                    <p>Import animal data from an adoption website URL</p>
+                </button>
+                <button class="option-button" onClick=${onSelectFromSite}>
+                    <h3>Select from Site</h3>
+                    <p>Browse and select multiple animals from a rescue site</p>
+                </button>
             </div>
-        `;
-        subtitle.textContent = 'Error loading data';
-    }
+        <//>
+    `;
 }
 
-// Rescue Selection Modal functions
-function openRescueSelectModal() {
-    document.getElementById('rescueSelectModal').classList.add('active');
-}
-
-function closeRescueSelectModal() {
-    document.getElementById('rescueSelectModal').classList.remove('active');
-}
-
-function selectRescue(rescue) {
-    selectedRescue = rescue;
-    closeRescueSelectModal();
-    openSelectFromSiteModal();
-}
-
-// Create Animal Modal functions
-function openCreateModal() {
-    document.getElementById('createModal').classList.add('active');
-}
-
-function closeCreateModal() {
-    document.getElementById('createModal').classList.remove('active');
-}
-
-function selectCreateOption(option) {
-    closeCreateModal();
-
-    if (option === 'manual') {
-        openManualEntryModal();
-    } else if (option === 'scrape') {
-        openScrapeModal();
-    } else if (option === 'selectFromSite') {
-        openRescueSelectModal();
-    }
-}
-
-// Scrape Modal functions
-function openScrapeModal() {
-    document.getElementById('scrapeModal').classList.add('active');
-    document.getElementById('scrapeUrl').value = '';
-}
-
-function closeScrapeModal() {
-    document.getElementById('scrapeModal').classList.remove('active');
-}
-
-async function scrapeUrl() {
-    const url = document.getElementById('scrapeUrl').value.trim();
-
-    if (!url) {
-        showToast('Please enter a URL', 'error');
-        return;
-    }
-
-    try {
-        showToast('Scraping data from URL...', 'success');
-        console.log('[App] Starting scrape for URL:', url);
-
-        if (!scrapeAnimalPage) {
-            throw new Error('Scraper module not loaded');
-        }
-
-        // Call the scraper directly
-        const scrapedData = await scrapeAnimalPage(url);
-        console.log('[App] Scraper completed');
-        console.log('[App] Scraped data:', scrapedData);
-
-        // Close scrape modal
-        closeScrapeModal();
-
-        // Load image if available
-        if (scrapedData.imagePath) {
-            try {
-                // Convert relative path to absolute path (relative to APP_PATH)
-                const imagePath = path.isAbsolute(scrapedData.imagePath)
-                    ? scrapedData.imagePath
-                    : path.join(APP_PATH, scrapedData.imagePath);
-                console.log('[App] Loading scraped image from:', imagePath);
-
-                // Read the image file
-                const data = fs.readFileSync(imagePath);
-
-                // Determine MIME type
-                const ext = imagePath.split('.').pop().toLowerCase();
-                const mimeTypes = {
-                    'jpg': 'image/jpeg',
-                    'jpeg': 'image/jpeg',
-                    'png': 'image/png',
-                    'gif': 'image/gif',
-                    'webp': 'image/webp'
-                };
-                const mime = mimeTypes[ext] || 'image/jpeg';
-
-                // Convert to hex for database
-                let hexString = '';
-                for (let i = 0; i < data.length; i++) {
-                    hexString += data[i].toString(16).padStart(2, '0');
-                }
-
-                // Store image data
-                newAnimalImageData = {
-                    hex: hexString,
-                    mime: mime,
-                    path: path.basename(imagePath)
-                };
-
-                // Convert to base64 for preview
-                const base64 = data.toString('base64');
-                scrapedData.imageDataUrl = `data:${mime};base64,${base64}`;
-
-                console.log('[App] Image loaded successfully');
-            } catch (imgErr) {
-                console.error('[App] Error loading scraped image:', imgErr);
-                console.error('[App] Error details:', imgErr.message, imgErr.stack);
-                showToast('Warning: Could not load scraped image', 'error');
-            }
-        }
-
-        // Open manual entry modal with pre-populated data
-        openManualEntryModalWithData(scrapedData);
-
-        showToast('Data scraped successfully!', 'success');
-
-    } catch (err) {
-        console.error('[App] Error scraping URL:', err);
-        showToast(`Error scraping URL: ${err.message}`, 'error');
-    }
-}
-
-function openManualEntryModalWithData(data) {
-    // Store the image data before opening modal (which resets it)
-    const savedImageData = newAnimalImageData;
-
-    openManualEntryModal();
-
-    // Restore the image data that was reset by openManualEntryModal
-    if (savedImageData) {
-        newAnimalImageData = savedImageData;
-    }
-
-    // Populate form fields with scraped data
-    if (data.name) document.getElementById('newName').value = data.name;
-    if (data.breed) document.getElementById('newBreed').value = data.breed;
-    if (data.slug) document.getElementById('newSlug').value = data.slug;
-    if (data.age_long) document.getElementById('newAgeLong').value = data.age_long;
-    if (data.age_short) document.getElementById('newAgeShort').value = data.age_short;
-    if (data.size) document.getElementById('newSize').value = data.size;
-    if (data.gender) document.getElementById('newGender').value = data.gender;
-    if (data.shots !== undefined) document.getElementById('newShots').value = data.shots;
-    if (data.housetrained !== undefined) document.getElementById('newHousetrained').value = data.housetrained;
-    if (data.kids !== undefined) document.getElementById('newKids').value = data.kids;
-    if (data.dogs !== undefined) document.getElementById('newDogs').value = data.dogs;
-    if (data.cats !== undefined) document.getElementById('newCats').value = data.cats;
-
-    // Update image preview if available
-    if (data.imageDataUrl) {
-        const imageContainer = document.querySelector('#manualEntryModal .modal-image-container');
-        let modalImage = document.getElementById('newAnimalImage');
-        const modalNoImage = document.getElementById('newAnimalNoImage');
-
-        if (!modalImage) {
-            modalImage = document.createElement('img');
-            modalImage.id = 'newAnimalImage';
-            modalImage.className = 'modal-image';
-            imageContainer.insertBefore(modalImage, imageContainer.firstChild);
-        }
-
-        modalImage.src = data.imageDataUrl;
-        modalImage.style.display = 'block';
-        modalNoImage.style.display = 'none';
-    }
-}
-
-// Manual Entry Modal functions
-function openManualEntryModal() {
-    newAnimalImageData = null; // Reset image data
-    document.getElementById('manualEntryModal').classList.add('active');
-
-    // Reset form
-    document.getElementById('createForm').reset();
-
-    // Reset image display
-    const modalImage = document.getElementById('newAnimalImage');
-    const modalNoImage = document.getElementById('newAnimalNoImage');
-    if (modalImage) {
-        modalImage.style.display = 'none';
-    }
-    modalNoImage.style.display = 'flex';
-}
-
-function closeManualEntryModal() {
-    document.getElementById('manualEntryModal').classList.remove('active');
-    newAnimalImageData = null;
-}
-
-async function handleNewAnimalImageSelected(event) {
-    const file = event.target.files[0];
-    if (!file) {
-        console.log('No file selected');
-        return;
-    }
-
-    console.log('File selected:', file.name, 'Size:', file.size, 'Type:', file.type);
-
-    try {
-        // Read file as ArrayBuffer
-        const arrayBuffer = await file.arrayBuffer();
-        const uint8Array = new Uint8Array(arrayBuffer);
-
-        // Convert to hex string for SQLite
-        let hexString = '';
-        for (let i = 0; i < uint8Array.length; i++) {
-            hexString += uint8Array[i].toString(16).padStart(2, '0');
-        }
-
-        // Store new animal image data
-        newAnimalImageData = {
-            hex: hexString,
-            mime: file.type || 'image/jpeg',
-            path: file.name
-        };
-
-        // Convert to base64 for preview
-        let binary = '';
-        for (let i = 0; i < uint8Array.length; i++) {
-            binary += String.fromCharCode(uint8Array[i]);
-        }
-        const base64 = btoa(binary);
-        const dataUrl = `data:${file.type};base64,${base64}`;
-
-        // Update preview - create img element if it doesn't exist
-        const imageContainer = document.querySelector('#manualEntryModal .modal-image-container');
-        let modalImage = document.getElementById('newAnimalImage');
-        const modalNoImage = document.getElementById('newAnimalNoImage');
-
-        if (!modalImage) {
-            modalImage = document.createElement('img');
-            modalImage.id = 'newAnimalImage';
-            modalImage.className = 'modal-image';
-            imageContainer.insertBefore(modalImage, imageContainer.firstChild);
-        }
-
-        modalImage.src = dataUrl;
-        modalImage.style.display = 'block';
-        modalNoImage.style.display = 'none';
-
-        showToast('Image selected. Click Create to save animal.');
-    } catch (err) {
-        console.error('Error loading image:', err);
-        showToast('Error loading image: ' + err.message, 'error');
-    }
-}
-
-async function loadNewAnimalImage(filePath) {
-    try {
-        // Read the file as binary
-        const data = fs.readFileSync(filePath);
-
-        // Determine MIME type from extension
-        const ext = filePath.split('.').pop().toLowerCase();
-        const mimeTypes = {
-            'jpg': 'image/jpeg',
-            'jpeg': 'image/jpeg',
-            'png': 'image/png',
-            'gif': 'image/gif',
-            'webp': 'image/webp'
-        };
-        const mime = mimeTypes[ext] || 'image/jpeg';
-
-        // Convert Buffer to hex string for SQLite
-        let hexString = '';
-        for (let i = 0; i < data.length; i++) {
-            hexString += data[i].toString(16).padStart(2, '0');
-        }
-
-        // Store new animal image data
-        newAnimalImageData = {
-            hex: hexString,
-            mime: mime,
-            path: path.basename(filePath)
-        };
-
-        // Convert to base64 for preview
-        const base64 = data.toString('base64');
-        const dataUrl = `data:${mime};base64,${base64}`;
-
-        // Update preview - create img element if it doesn't exist
-        const imageContainer = document.querySelector('#manualEntryModal .modal-image-container');
-        let modalImage = document.getElementById('newAnimalImage');
-        const modalNoImage = document.getElementById('newAnimalNoImage');
-
-        if (!modalImage) {
-            modalImage = document.createElement('img');
-            modalImage.id = 'newAnimalImage';
-            modalImage.className = 'modal-image';
-            imageContainer.insertBefore(modalImage, imageContainer.firstChild);
-        }
-
-        modalImage.src = dataUrl;
-        modalImage.style.display = 'block';
-        modalNoImage.style.display = 'none';
-
-        showToast('Image selected. Click Create to save animal.');
-    } catch (err) {
-        console.error('Error loading image:', err);
-        showToast('Error loading image: ' + err.message, 'error');
-    }
-}
-
-async function createAnimal() {
-    const animalData = {
-        name: document.getElementById('newName').value,
-        breed: document.getElementById('newBreed').value,
-        slug: document.getElementById('newSlug').value,
-        age_long: document.getElementById('newAgeLong').value,
-        age_short: document.getElementById('newAgeShort').value,
-        size: document.getElementById('newSize').value,
-        gender: document.getElementById('newGender').value,
-        shots: document.getElementById('newShots').value === '1',
-        housetrained: document.getElementById('newHousetrained').value === '1',
-        kids: document.getElementById('newKids').value,
-        dogs: document.getElementById('newDogs').value,
-        cats: document.getElementById('newCats').value,
-        rescue_id: parseInt(document.getElementById('newRescue').value, 10)
-    };
-
-    try {
-        console.log('[App] Creating animal with image data:', newAnimalImageData ? 'Yes' : 'No');
-        if (newAnimalImageData) {
-            console.log('[App] Image data size:', newAnimalImageData.hex.length / 2, 'bytes');
-        }
-        db.createAnimal(animalData, newAnimalImageData);
-        showToast(`${animalData.name} created successfully!`);
-        closeManualEntryModal();
-        await loadAnimals();
-    } catch (err) {
-        console.error('[App] Error creating animal:', err);
-        showToast(`Error creating animal: ${err.message}`, 'error');
-    }
-}
-
-// Modal functions
-function openEditModal(animalId) {
-    currentAnimal = animals.find(a => a.id === animalId);
-    if (!currentAnimal) return;
-
-    pendingImageData = null; // Reset pending image
-
-    document.getElementById('editModal').classList.add('active');
-
-    // Set image
-    const modalImage = document.getElementById('modalImage');
-    const modalNoImage = document.getElementById('modalNoImage');
-    if (currentAnimal.imageDataUrl) {
-        modalImage.src = currentAnimal.imageDataUrl;
-        modalImage.style.display = 'block';
-        modalNoImage.style.display = 'none';
-    } else {
-        modalImage.style.display = 'none';
-        modalNoImage.style.display = 'flex';
-    }
-
-    // Fill form fields
-    document.getElementById('animalId').value = currentAnimal.id;
-    document.getElementById('name').value = currentAnimal.name || '';
-    document.getElementById('breed').value = currentAnimal.breed || '';
-    document.getElementById('slug').value = currentAnimal.slug || '';
-    document.getElementById('ageLong').value = currentAnimal.age_long || '';
-    document.getElementById('ageShort').value = currentAnimal.age_short || '';
-    document.getElementById('size').value = currentAnimal.size || 'Medium';
-    document.getElementById('gender').value = currentAnimal.gender || 'Male';
-    document.getElementById('shots').value = currentAnimal.shots ? '1' : '0';
-    document.getElementById('housetrained').value = currentAnimal.housetrained ? '1' : '0';
-
-    // Handle compatibility fields (can be 1, 0, or ?)
-    const kidsVal = String(currentAnimal.kids);
-    document.getElementById('kids').value = kidsVal === '1' ? '1' : kidsVal === '0' ? '0' : '?';
-
-    const dogsVal = String(currentAnimal.dogs);
-    document.getElementById('dogs').value = dogsVal === '1' ? '1' : dogsVal === '0' ? '0' : '?';
-
-    const catsVal = String(currentAnimal.cats);
-    document.getElementById('cats').value = catsVal === '1' ? '1' : catsVal === '0' ? '0' : '?';
-
-    // Set rescue organization
-    document.getElementById('rescue').value = currentAnimal.rescue_id || 1;
-}
-
-function closeModal() {
-    document.getElementById('editModal').classList.remove('active');
-    currentAnimal = null;
-    pendingImageData = null;
-}
-
-// Image change functionality
-async function handleEditImageSelected(event) {
-    if (!currentAnimal) return;
-
-    const file = event.target.files[0];
-    if (!file) {
-        console.log('No file selected');
-        return;
-    }
-
-    console.log('File selected:', file.name, 'Size:', file.size, 'Type:', file.type);
-
-    try {
-        // Read file as ArrayBuffer
-        const arrayBuffer = await file.arrayBuffer();
-        const uint8Array = new Uint8Array(arrayBuffer);
-
-        // Convert to hex string for SQLite
-        let hexString = '';
-        for (let i = 0; i < uint8Array.length; i++) {
-            hexString += uint8Array[i].toString(16).padStart(2, '0');
-        }
-
-        // Store pending image data
-        pendingImageData = {
-            hex: hexString,
-            mime: file.type || 'image/jpeg',
-            path: file.name
-        };
-
-        // Convert to base64 for preview
-        let binary = '';
-        for (let i = 0; i < uint8Array.length; i++) {
-            binary += String.fromCharCode(uint8Array[i]);
-        }
-        const base64 = btoa(binary);
-        const dataUrl = `data:${file.type};base64,${base64}`;
-
-        // Update preview
-        const modalImage = document.getElementById('modalImage');
-        const modalNoImage = document.getElementById('modalNoImage');
-        modalImage.src = dataUrl;
-        modalImage.style.display = 'block';
-        modalNoImage.style.display = 'none';
-
-        showToast('Image selected. Click Save to apply changes.');
-    } catch (err) {
-        console.error('Error loading image:', err);
-        showToast('Error loading image: ' + err.message, 'error');
-    }
-}
-
-async function loadNewImage(filePath) {
-    try {
-        // Read the file as binary
-        const data = fs.readFileSync(filePath);
-
-        // Determine MIME type from extension
-        const ext = filePath.split('.').pop().toLowerCase();
-        const mimeTypes = {
-            'jpg': 'image/jpeg',
-            'jpeg': 'image/jpeg',
-            'png': 'image/png',
-            'gif': 'image/gif',
-            'webp': 'image/webp'
-        };
-        const mime = mimeTypes[ext] || 'image/jpeg';
-
-        // Convert Buffer to hex string for SQLite
-        let hexString = '';
-        for (let i = 0; i < data.length; i++) {
-            hexString += data[i].toString(16).padStart(2, '0');
-        }
-
-        // Store pending image data
-        pendingImageData = {
-            hex: hexString,
-            mime: mime,
-            path: path.basename(filePath)
-        };
-
-        // Convert to base64 for preview
-        const base64 = data.toString('base64');
-        const dataUrl = `data:${mime};base64,${base64}`;
-
-        // Update preview
-        const modalImage = document.getElementById('modalImage');
-        const modalNoImage = document.getElementById('modalNoImage');
-        modalImage.src = dataUrl;
-        modalImage.style.display = 'block';
-        modalNoImage.style.display = 'none';
-
-        showToast('Image selected. Click Save to apply changes.');
-    } catch (err) {
-        console.error('Error loading image:', err);
-        showToast('Error loading image: ' + err.message, 'error');
-    }
-}
-
-async function saveAnimal() {
-    if (!currentAnimal) return;
-
-    const id = parseInt(document.getElementById('animalId').value, 10);
-    const animalData = {
-        name: document.getElementById('name').value,
-        breed: document.getElementById('breed').value,
-        slug: document.getElementById('slug').value,
-        age_long: document.getElementById('ageLong').value,
-        age_short: document.getElementById('ageShort').value,
-        size: document.getElementById('size').value,
-        gender: document.getElementById('gender').value,
-        shots: document.getElementById('shots').value === '1',
-        housetrained: document.getElementById('housetrained').value === '1',
-        kids: document.getElementById('kids').value,
-        dogs: document.getElementById('dogs').value,
-        cats: document.getElementById('cats').value,
-        rescue_id: parseInt(document.getElementById('rescue').value, 10)
-    };
-
-    try {
-        db.updateAnimal(id, animalData, pendingImageData);
-        showToast(`${animalData.name} updated successfully!`);
-        closeModal();
-        await loadAnimals();
-    } catch (err) {
-        showToast(`Error saving: ${err.message}`, 'error');
-    }
-}
-
-async function deleteAnimal() {
-    if (!currentAnimal) return;
-
-    const name = currentAnimal.name;
-    const confirmed = confirm(`Are you sure you want to delete ${name}? This cannot be undone.`);
-
-    if (!confirmed) return;
-
-    try {
-        db.deleteAnimal(currentAnimal.id);
-        showToast(`${name} deleted successfully!`);
-        closeModal();
-        await loadAnimals();
-    } catch (err) {
-        showToast(`Error deleting: ${err.message}`, 'error');
-    }
-}
-
-// Print Multiple Modal functions
-let selectedPrintAnimalIds = new Set();
-
-function openPrintMultipleModal() {
-    document.getElementById('printMultipleModal').classList.add('active');
-    selectedPrintAnimalIds.clear();
-    renderPrintAnimalGrid();
-}
-
-function closePrintMultipleModal() {
-    document.getElementById('printMultipleModal').classList.remove('active');
-    selectedPrintAnimalIds.clear();
-}
-
-function renderPrintAnimalGrid() {
-    const grid = document.getElementById('printAnimalGrid');
-    const printButton = document.getElementById('printButton');
-    const selectAllCheckbox = document.getElementById('printSelectAllCheckbox');
-
-    if (animals.length === 0) {
-        grid.innerHTML = '<div style="padding: 20px; text-align: center; color: #666;">No animals to print.</div>';
-        printButton.disabled = true;
-        return;
-    }
-
-    let html = '';
-    for (const animal of animals) {
-        const isSelected = selectedPrintAnimalIds.has(animal.id);
-        html += `
-            <div class="delete-animal-item ${isSelected ? 'selected' : ''}" onclick="togglePrintAnimal(${animal.id})">
-                <input type="checkbox" ${isSelected ? 'checked' : ''} onclick="event.stopPropagation(); togglePrintAnimal(${animal.id})">
-                ${animal.imageDataUrl
-                    ? `<img class="delete-animal-thumbnail" src="${animal.imageDataUrl}" alt="${animal.name}">`
-                    : `<div class="delete-animal-no-image">🐕</div>`
-                }
-                <div class="delete-animal-name">${animal.name}</div>
+function RescueSelectModal({ isOpen, onClose, onSelect }) {
+    return html`
+        <${Modal} isOpen=${isOpen} onClose=${onClose} title="Select Rescue Organization">
+            <div class="create-options">
+                <button class="option-button" onClick=${() => onSelect('wagtopia')}>
+                    <h3>Paws Rescue League</h3>
+                    <p>Browse animals from Wagtopia</p>
+                </button>
+                <button class="option-button" onClick=${() => onSelect('adoptapet')}>
+                    <h3>Brass City Rescue</h3>
+                    <p>Browse animals from Adoptapet</p>
+                </button>
             </div>
-        `;
-    }
-
-    grid.innerHTML = html;
-
-    // Update select all checkbox state
-    selectAllCheckbox.checked = selectedPrintAnimalIds.size === animals.length && animals.length > 0;
-
-    updatePrintButton();
+        <//>
+    `;
 }
 
-function togglePrintAnimal(animalId) {
-    if (selectedPrintAnimalIds.has(animalId)) {
-        selectedPrintAnimalIds.delete(animalId);
-    } else {
-        selectedPrintAnimalIds.add(animalId);
-    }
-    renderPrintAnimalGrid();
-}
+function ScrapeModal({ isOpen, onClose, onScrape }) {
+    const [url, setUrl] = useState('');
+    const [loading, setLoading] = useState(false);
+    const showToast = useToast();
 
-function togglePrintSelectAll() {
-    const selectAllCheckbox = document.getElementById('printSelectAllCheckbox');
-
-    if (selectAllCheckbox.checked) {
-        // Select all
-        for (const animal of animals) {
-            selectedPrintAnimalIds.add(animal.id);
-        }
-    } else {
-        // Deselect all
-        selectedPrintAnimalIds.clear();
-    }
-
-    renderPrintAnimalGrid();
-}
-
-function updatePrintButton() {
-    const printButton = document.getElementById('printButton');
-    const count = selectedPrintAnimalIds.size;
-
-    if (count > 0) {
-        printButton.disabled = false;
-        printButton.textContent = `Print Selected (${count})`;
-    } else {
-        printButton.disabled = true;
-        printButton.textContent = 'Print Selected';
-    }
-}
-
-async function printSelectedAnimals() {
-    if (selectedPrintAnimalIds.size === 0) {
-        showToast('Please select at least one animal to print', 'error');
-        return;
-    }
-
-    const count = selectedPrintAnimalIds.size;
-    const animalNames = animals
-        .filter(a => selectedPrintAnimalIds.has(a.id))
-        .map(a => a.name)
-        .slice(0, 3)
-        .join(', ');
-
-    const displayNames = count > 3 ? `${animalNames} and ${count - 3} more` : animalNames;
-
-    const confirmed = confirm(
-        `Generate cards for ${count} animal${count > 1 ? 's' : ''}?\n\n${displayNames}\n\nCards will be added to the print queue.`
-    );
-
-    if (!confirmed) return;
-
-    // Add all selected animals to the generation queue
-    const idsToGenerate = Array.from(selectedPrintAnimalIds);
-    for (const animalId of idsToGenerate) {
-        const animal = animals.find(a => a.id === animalId);
-        if (animal) {
-            cardGenerationQueue.push({ animalId });
-            console.log('[Queue] Added', animal.name, 'to queue. Queue length:', cardGenerationQueue.length);
-        }
-    }
-
-    showToast(`Added ${count} animal${count > 1 ? 's' : ''} to generation queue`, 'success');
-
-    // Close modal
-    closePrintMultipleModal();
-
-    // Start processing the queue
-    processCardGenerationQueue();
-}
-
-// Close modal on escape key
-document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') {
-        closeModal();
-        closeRescueSelectModal();
-        closeCreateModal();
-        closeManualEntryModal();
-        closeScrapeModal();
-        closeSelectFromSiteModal();
-        closeDeleteMultipleModal();
-        closePrintMultipleModal();
-        closePrintSettingsModal();
-        closeManageProfilesModal();
-        closeSaveProfileDialog();
-    }
-});
-
-// Print Settings Modal functions
-let cachedPrinters = null;
-let currentPrintFilePath = null;
-let currentPrintCallback = null;
-let cachedProfiles = {}; // Cache profiles by printer name
-let currentEditProfileId = null;
-let saveProfileSource = 'printSettings'; // 'printSettings' or 'manage'
-
-function refreshPrinters() {
-    cachedPrinters = null;
-    loadPrinters();
-}
-
-async function loadPrinters() {
-    const printerSelect = document.getElementById('printerSelect');
-    const printerStatus = document.getElementById('printerStatus');
-
-    printerStatus.className = 'printer-status loading';
-    printerStatus.textContent = 'Loading printers...';
-
-    try {
-        const result = await ipcRenderer.invoke('get-printers');
-
-        if (!result.success) {
-            throw new Error(result.error || 'Failed to get printers');
-        }
-
-        cachedPrinters = result.printers;
-        console.log('[App] Loaded printers:', cachedPrinters);
-
-        // Clear and populate printer select
-        printerSelect.innerHTML = '';
-
-        if (cachedPrinters.length === 0) {
-            printerSelect.innerHTML = '<option value="">No printers found</option>';
-            printerStatus.className = 'printer-status error';
-            printerStatus.textContent = 'No printers found. Please install a printer.';
+    const handleScrape = async () => {
+        if (!url.trim()) {
+            showToast('Please enter a URL', 'error');
             return;
         }
-
-        // Find default printer and add all printers to select
-        let defaultPrinterName = null;
-        cachedPrinters.forEach(printer => {
-            const option = document.createElement('option');
-            option.value = printer.name;
-            option.textContent = printer.name + (printer.isDefault ? ' (Default)' : '');
-            if (printer.isDefault) {
-                option.selected = true;
-                defaultPrinterName = printer.name;
-            }
-            printerSelect.appendChild(option);
-        });
-
-        printerStatus.className = 'printer-status';
-        printerStatus.style.display = 'none';
-
-        // Load profiles for the default/selected printer
-        if (printerSelect.value) {
-            await loadPrintProfiles(printerSelect.value);
-        }
-
-    } catch (err) {
-        console.error('[App] Error loading printers:', err);
-        printerSelect.innerHTML = '<option value="">Error loading printers</option>';
-        printerStatus.className = 'printer-status error';
-        printerStatus.textContent = 'Error: ' + err.message;
-    }
-}
-
-function openPrintSettingsModal(filePath, callback) {
-    currentPrintFilePath = filePath;
-    currentPrintCallback = callback;
-
-    document.getElementById('printSettingsModal').classList.add('active');
-
-    // Set preview image
-    const previewImage = document.getElementById('printPreviewImage');
-    previewImage.src = 'file:///' + filePath.replace(/\\/g, '/');
-
-    // Reset form values
-    document.getElementById('copiesInput').value = 1;
-    document.getElementById('paperSizeSelect').value = 'letter';
-    document.querySelector('input[name="orientation"][value="landscape"]').checked = true;
-
-    // Load printers if not cached
-    if (!cachedPrinters) {
-        loadPrinters();
-    } else {
-        // Printers already cached, but still need to load profiles for selected printer
-        const printerSelect = document.getElementById('printerSelect');
-        if (printerSelect.value) {
-            loadPrintProfiles(printerSelect.value);
-        }
-    }
-}
-
-function closePrintSettingsModal() {
-    document.getElementById('printSettingsModal').classList.remove('active');
-    currentPrintFilePath = null;
-    currentPrintCallback = null;
-}
-
-// Print Profile functions
-async function loadPrintProfiles(printerName) {
-    const profileSelect = document.getElementById('printProfileSelect');
-
-    try {
-        const result = await ipcRenderer.invoke('get-print-profiles', printerName);
-
-        if (!result.success) {
-            console.error('[App] Error loading profiles:', result.error);
-            return;
-        }
-
-        cachedProfiles[printerName] = result.profiles;
-        console.log('[App] Loaded profiles for', printerName, ':', result.profiles);
-
-        // Clear and populate profile select
-        profileSelect.innerHTML = '<option value="">No profile selected</option>';
-
-        result.profiles.forEach(profile => {
-            const option = document.createElement('option');
-            option.value = profile.id;
-            const isCalibrated = profile.calibration_ab && profile.calibration_bc &&
-                                 profile.calibration_cd && profile.calibration_da;
-            let label = profile.name;
-            if (profile.is_default) label += ' (Default)';
-            if (isCalibrated) label += ' [Cal]';
-            option.textContent = label;
-            if (profile.is_default) {
-                option.selected = true;
-            }
-            profileSelect.appendChild(option);
-        });
-
-        // If there's a default profile, apply its settings
-        const defaultProfile = result.profiles.find(p => p.is_default);
-        if (defaultProfile) {
-            applyPrintProfile(defaultProfile);
-        }
-
-    } catch (err) {
-        console.error('[App] Error loading profiles:', err);
-    }
-}
-
-function applyPrintProfile(profile) {
-    if (!profile) return;
-
-    document.getElementById('copiesInput').value = profile.copies || 1;
-    document.getElementById('paperSizeSelect').value = profile.paper_size || 'letter';
-    document.getElementById('paperSourceSelect').value = profile.paper_source || 'default';
-
-    const orientationValue = profile.orientation || 'landscape';
-    const orientationRadio = document.querySelector(`input[name="orientation"][value="${orientationValue}"]`);
-    if (orientationRadio) {
-        orientationRadio.checked = true;
-    }
-
-    console.log('[App] Applied profile:', profile.name);
-}
-
-async function onPrinterChange() {
-    const printerSelect = document.getElementById('printerSelect');
-    const printerName = printerSelect.value;
-
-    if (printerName) {
-        await loadPrintProfiles(printerName);
-    } else {
-        // Clear profile select
-        const profileSelect = document.getElementById('printProfileSelect');
-        profileSelect.innerHTML = '<option value="">No profile selected</option>';
-    }
-}
-
-function onProfileChange() {
-    const profileSelect = document.getElementById('printProfileSelect');
-    const printerSelect = document.getElementById('printerSelect');
-    const profileId = profileSelect.value;
-
-    if (!profileId || !printerSelect.value) return;
-
-    const profiles = cachedProfiles[printerSelect.value] || [];
-    const profile = profiles.find(p => p.id == profileId);
-
-    if (profile) {
-        applyPrintProfile(profile);
-    }
-}
-
-function getCurrentPrintSettings() {
-    return {
-        copies: parseInt(document.getElementById('copiesInput').value) || 1,
-        paper_size: document.getElementById('paperSizeSelect').value || 'letter',
-        orientation: document.querySelector('input[name="orientation"]:checked')?.value || 'landscape',
-        paper_source: document.getElementById('paperSourceSelect').value || 'default'
-    };
-}
-
-function openSaveProfileDialog() {
-    saveProfileSource = 'printSettings';
-    currentEditProfileId = null;
-
-    const printerSelect = document.getElementById('printerSelect');
-    const printerName = printerSelect.value;
-
-    if (!printerName) {
-        showToast('Please select a printer first', 'error');
-        return;
-    }
-
-    // Store printer name
-    document.getElementById('saveProfilePrinterName').value = printerName;
-    document.getElementById('editProfileId').value = '';
-
-    // Get current settings
-    const settings = getCurrentPrintSettings();
-
-    // Set settings in dialog inputs
-    document.getElementById('saveProfileCopies').value = settings.copies;
-    document.getElementById('saveProfilePaperSize').value = settings.paper_size;
-    document.getElementById('saveProfilePaperSource').value = settings.paper_source;
-    const orientationRadio = document.querySelector(`input[name="saveProfileOrientation"][value="${settings.orientation}"]`);
-    if (orientationRadio) orientationRadio.checked = true;
-
-    // Reset form
-    document.getElementById('profileNameInput').value = '';
-    document.getElementById('setAsDefaultCheckbox').checked = false;
-    document.getElementById('saveProfileTitle').textContent = 'Save Print Profile';
-
-    // Clear calibration inputs for new profile
-    clearCalibration();
-
-    document.getElementById('saveProfileModal').classList.add('active');
-}
-
-function openSaveProfileDialogFromManage() {
-    saveProfileSource = 'manage';
-    currentEditProfileId = null;
-
-    const printerSelect = document.getElementById('manageProfilesPrinterSelect');
-    const printerName = printerSelect.value;
-
-    if (!printerName) {
-        showToast('Please select a printer first', 'error');
-        return;
-    }
-
-    // Close manage profiles modal first to prevent z-index/focus issues
-    document.getElementById('manageProfilesModal').classList.remove('active');
-
-    // Store printer name
-    document.getElementById('saveProfilePrinterName').value = printerName;
-    document.getElementById('editProfileId').value = '';
-
-    // Use default settings
-    document.getElementById('saveProfileCopies').value = 1;
-    document.getElementById('saveProfilePaperSize').value = 'letter';
-    document.getElementById('saveProfilePaperSource').value = 'default';
-    document.querySelector('input[name="saveProfileOrientation"][value="landscape"]').checked = true;
-
-    // Reset form
-    document.getElementById('profileNameInput').value = '';
-    document.getElementById('setAsDefaultCheckbox').checked = false;
-    document.getElementById('saveProfileTitle').textContent = 'New Print Profile';
-
-    // Clear calibration inputs for new profile
-    clearCalibration();
-
-    document.getElementById('saveProfileModal').classList.add('active');
-}
-
-function openEditProfileDialog(profileId) {
-    const printerSelect = document.getElementById('manageProfilesPrinterSelect');
-    const printerName = printerSelect.value;
-    const profiles = cachedProfiles[printerName] || [];
-    const profile = profiles.find(p => p.id == profileId);
-
-    if (!profile) {
-        showToast('Profile not found', 'error');
-        return;
-    }
-
-    // Close manage profiles modal first to prevent z-index/focus issues
-    document.getElementById('manageProfilesModal').classList.remove('active');
-
-    saveProfileSource = 'manage';
-    currentEditProfileId = profileId;
-
-    document.getElementById('saveProfilePrinterName').value = printerName;
-    document.getElementById('editProfileId').value = profileId;
-
-    // Set settings in dialog inputs
-    document.getElementById('saveProfileCopies').value = profile.copies || 1;
-    document.getElementById('saveProfilePaperSize').value = profile.paper_size || 'letter';
-    document.getElementById('saveProfilePaperSource').value = profile.paper_source || 'default';
-    const orientationValue = profile.orientation || 'landscape';
-    const orientationRadio = document.querySelector(`input[name="saveProfileOrientation"][value="${orientationValue}"]`);
-    if (orientationRadio) orientationRadio.checked = true;
-
-    // Fill form
-    document.getElementById('profileNameInput').value = profile.name;
-    document.getElementById('setAsDefaultCheckbox').checked = profile.is_default == 1;
-    document.getElementById('saveProfileTitle').textContent = 'Edit Print Profile';
-
-    // Set calibration values if present
-    setCalibrationValues(profile);
-
-    document.getElementById('saveProfileModal').classList.add('active');
-}
-
-function closeSaveProfileDialog() {
-    document.getElementById('saveProfileModal').classList.remove('active');
-
-    // Reopen manage profiles modal if we came from there
-    if (saveProfileSource === 'manage') {
-        document.getElementById('manageProfilesModal').classList.add('active');
-    }
-
-    currentEditProfileId = null;
-}
-
-async function saveProfile() {
-    const profileName = document.getElementById('profileNameInput').value.trim();
-    const printerName = document.getElementById('saveProfilePrinterName').value;
-    const isDefault = document.getElementById('setAsDefaultCheckbox').checked;
-    const editId = document.getElementById('editProfileId').value;
-
-    if (!profileName) {
-        showToast('Please enter a profile name', 'error');
-        return;
-    }
-
-    if (!printerName) {
-        showToast('No printer selected', 'error');
-        return;
-    }
-
-    // Get settings from dialog inputs
-    const settings = {
-        copies: parseInt(document.getElementById('saveProfileCopies').value) || 1,
-        paper_size: document.getElementById('saveProfilePaperSize').value || 'letter',
-        orientation: document.querySelector('input[name="saveProfileOrientation"]:checked')?.value || 'landscape',
-        paper_source: document.getElementById('saveProfilePaperSource').value || 'default'
-    };
-
-    // Get calibration values from inputs
-    const calibration = getCalibrationValues();
-
-    const profileData = {
-        id: editId ? parseInt(editId) : null,
-        name: profileName,
-        printer_name: printerName,
-        copies: settings.copies,
-        paper_size: settings.paper_size,
-        orientation: settings.orientation,
-        paper_source: settings.paper_source,
-        is_default: isDefault,
-        calibration_ab: calibration ? calibration.ab : null,
-        calibration_bc: calibration ? calibration.bc : null,
-        calibration_cd: calibration ? calibration.cd : null,
-        calibration_da: calibration ? calibration.da : null,
-        border_top: calibration ? calibration.borderTop : null,
-        border_right: calibration ? calibration.borderRight : null,
-        border_bottom: calibration ? calibration.borderBottom : null,
-        border_left: calibration ? calibration.borderLeft : null
-    };
-
-    try {
-        const result = await ipcRenderer.invoke('save-print-profile', profileData);
-
-        if (result.success) {
-            showToast(editId ? 'Profile updated!' : 'Profile saved!', 'success');
-            closeSaveProfileDialog();
-
-            // Refresh profiles
-            delete cachedProfiles[printerName];
-
-            if (saveProfileSource === 'printSettings') {
-                await loadPrintProfiles(printerName);
-            } else {
-                await loadProfilesForManagement();
-            }
-        } else {
-            showToast('Error saving profile: ' + result.error, 'error');
-        }
-    } catch (err) {
-        console.error('[App] Error saving profile:', err);
-        showToast('Error saving profile: ' + err.message, 'error');
-    }
-}
-
-// Manage Profiles Modal functions
-function openManageProfilesModal() {
-    document.getElementById('manageProfilesModal').classList.add('active');
-
-    // Populate printer select
-    const printerSelect = document.getElementById('manageProfilesPrinterSelect');
-    printerSelect.innerHTML = '<option value="">Select a printer...</option>';
-
-    if (cachedPrinters && cachedPrinters.length > 0) {
-        cachedPrinters.forEach(printer => {
-            const option = document.createElement('option');
-            option.value = printer.name;
-            option.textContent = printer.name + (printer.isDefault ? ' (Default)' : '');
-            printerSelect.appendChild(option);
-        });
-
-        // Select the printer from print settings if available
-        const printSettingsPrinter = document.getElementById('printerSelect').value;
-        if (printSettingsPrinter) {
-            printerSelect.value = printSettingsPrinter;
-            loadProfilesForManagement();
-        }
-    }
-}
-
-// Open Manage Profiles from main page (loads printers if needed)
-async function openManageProfilesFromMain() {
-    document.getElementById('manageProfilesModal').classList.add('active');
-
-    const printerSelect = document.getElementById('manageProfilesPrinterSelect');
-    printerSelect.innerHTML = '<option value="">Loading printers...</option>';
-
-    // Load printers if not cached
-    if (!cachedPrinters) {
+        setLoading(true);
         try {
-            const result = await ipcRenderer.invoke('get-printers');
-            if (result.success) {
-                cachedPrinters = result.printers;
-            } else {
-                printerSelect.innerHTML = '<option value="">Error loading printers</option>';
-                return;
-            }
+            await onScrape(url.trim());
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const footer = html`
+        <button class="btn btn-secondary" onClick=${onClose}>Cancel</button>
+        <button class="btn btn-primary" onClick=${handleScrape} disabled=${loading}>
+            ${loading ? 'Scraping...' : 'Scrape Data'}
+        </button>
+    `;
+
+    return html`
+        <${Modal} isOpen=${isOpen} onClose=${onClose} title="Scrape from URL" footer=${footer}>
+            <${FormGroup} label="Adoption Page URL" id="scrapeUrl">
+                <input
+                    type="text"
+                    id="scrapeUrl"
+                    placeholder="https://example.com/adopt/dog-name"
+                    value=${url}
+                    onInput=${(e) => setUrl(e.target.value)}
+                />
+            <//>
+            <p style="color: #666; font-size: 0.9rem; margin-top: 10px;">
+                Enter the URL of an animal adoption page to automatically extract information.
+            </p>
+        <//>
+    `;
+}
+
+function ManualEntryModal({ isOpen, onClose, rescues, initialData, onSubmit }) {
+    const [imageData, setImageData] = useState(null);
+    const formRef = useRef(null);
+    const showToast = useToast();
+
+    useEffect(() => {
+        if (isOpen && initialData?.imageDataUrl) {
+            setImageData({ dataUrl: initialData.imageDataUrl, ...initialData.imageData });
+        } else if (!isOpen) {
+            setImageData(null);
+        }
+    }, [isOpen, initialData]);
+
+    const handleSubmit = () => {
+        const data = getFormData(formRef);
+        if (!data) return;
+
+        const imageToSave = imageData ? { hex: imageData.hex, mime: imageData.mime, path: imageData.path } : null;
+
+        try {
+            db.createAnimal(data, imageToSave);
+            showToast(`${data.name} created successfully!`);
+            onClose();
+            onSubmit();
         } catch (err) {
-            console.error('[App] Error loading printers:', err);
-            printerSelect.innerHTML = '<option value="">Error loading printers</option>';
-            return;
+            showToast(`Error creating animal: ${err.message}`, 'error');
         }
-    }
-
-    // Populate printer select
-    printerSelect.innerHTML = '<option value="">Select a printer...</option>';
-
-    if (cachedPrinters && cachedPrinters.length > 0) {
-        let defaultPrinter = null;
-        cachedPrinters.forEach(printer => {
-            const option = document.createElement('option');
-            option.value = printer.name;
-            option.textContent = printer.name + (printer.isDefault ? ' (Default)' : '');
-            if (printer.isDefault) {
-                defaultPrinter = printer.name;
-            }
-            printerSelect.appendChild(option);
-        });
-
-        // Auto-select the default printer and load its profiles
-        if (defaultPrinter) {
-            printerSelect.value = defaultPrinter;
-            loadProfilesForManagement();
-        }
-    } else {
-        printerSelect.innerHTML = '<option value="">No printers found</option>';
-    }
-}
-
-function closeManageProfilesModal() {
-    document.getElementById('manageProfilesModal').classList.remove('active');
-}
-
-async function loadProfilesForManagement() {
-    const printerSelect = document.getElementById('manageProfilesPrinterSelect');
-    const profileList = document.getElementById('profileList');
-    const addNewProfileBtn = document.getElementById('addNewProfileBtn');
-    const printerName = printerSelect.value;
-
-    if (!printerName) {
-        profileList.innerHTML = '<div class="profile-empty">Select a printer to view profiles</div>';
-        addNewProfileBtn.style.display = 'none';
-        return;
-    }
-
-    addNewProfileBtn.style.display = 'block';
-
-    try {
-        const result = await ipcRenderer.invoke('get-print-profiles', printerName);
-
-        if (!result.success) {
-            profileList.innerHTML = '<div class="profile-empty">Error loading profiles</div>';
-            return;
-        }
-
-        cachedProfiles[printerName] = result.profiles;
-
-        if (result.profiles.length === 0) {
-            profileList.innerHTML = '<div class="profile-empty">No profiles for this printer</div>';
-            return;
-        }
-
-        profileList.innerHTML = result.profiles.map(profile => {
-            const isCalibrated = profile.calibration_ab && profile.calibration_bc &&
-                                 profile.calibration_cd && profile.calibration_da;
-            return `
-            <div class="profile-item">
-                <div class="profile-item-info">
-                    <div class="profile-item-name">
-                        ${escapeHtml(profile.name)}
-                        ${profile.is_default ? '<span class="default-badge">Default</span>' : ''}
-                        ${isCalibrated ? '<span class="default-badge" style="background: #28a745;">Calibrated</span>' : ''}
-                    </div>
-                    <div class="profile-item-settings">
-                        ${getPaperSizeLabel(profile.paper_size)}, ${capitalizeFirst(profile.orientation)}, ${profile.copies} ${profile.copies === 1 ? 'copy' : 'copies'}
-                    </div>
-                </div>
-                <div class="profile-item-actions">
-                    ${!profile.is_default ? `<button class="btn btn-secondary" onclick="setProfileAsDefault(${profile.id})">Set Default</button>` : ''}
-                    <button class="btn btn-secondary" onclick="copyProfile(${profile.id})">Copy</button>
-                    <button class="btn btn-secondary" onclick="openEditProfileDialog(${profile.id})">Edit</button>
-                    <button class="btn btn-danger-outline" onclick="deleteProfile(${profile.id})">Delete</button>
-                </div>
-            </div>
-        `}).join('');
-
-    } catch (err) {
-        console.error('[App] Error loading profiles for management:', err);
-        profileList.innerHTML = '<div class="profile-empty">Error loading profiles</div>';
-    }
-}
-
-async function setProfileAsDefault(profileId) {
-    try {
-        const result = await ipcRenderer.invoke('set-default-print-profile', profileId);
-
-        if (result.success) {
-            showToast('Default profile updated!', 'success');
-
-            // Refresh the management list
-            const printerName = document.getElementById('manageProfilesPrinterSelect').value;
-            delete cachedProfiles[printerName];
-            await loadProfilesForManagement();
-
-            // Also refresh the print settings dropdown if same printer
-            const printSettingsPrinter = document.getElementById('printerSelect').value;
-            if (printSettingsPrinter === printerName) {
-                await loadPrintProfiles(printerName);
-            }
-        } else {
-            showToast('Error setting default: ' + result.error, 'error');
-        }
-    } catch (err) {
-        console.error('[App] Error setting default profile:', err);
-        showToast('Error setting default: ' + err.message, 'error');
-    }
-}
-
-async function deleteProfile(profileId) {
-    if (!confirm('Are you sure you want to delete this profile?')) {
-        return;
-    }
-
-    try {
-        const result = await ipcRenderer.invoke('delete-print-profile', profileId);
-
-        if (result.success) {
-            showToast('Profile deleted!', 'success');
-
-            // Refresh the management list
-            const printerName = document.getElementById('manageProfilesPrinterSelect').value;
-            delete cachedProfiles[printerName];
-            await loadProfilesForManagement();
-
-            // Also refresh the print settings dropdown if same printer
-            const printSettingsPrinter = document.getElementById('printerSelect').value;
-            if (printSettingsPrinter === printerName) {
-                await loadPrintProfiles(printerName);
-            }
-        } else {
-            showToast('Error deleting profile: ' + result.error, 'error');
-        }
-    } catch (err) {
-        console.error('[App] Error deleting profile:', err);
-        showToast('Error deleting profile: ' + err.message, 'error');
-    }
-}
-
-async function copyProfile(profileId) {
-    const printerName = document.getElementById('manageProfilesPrinterSelect').value;
-    const profiles = cachedProfiles[printerName] || [];
-    const profile = profiles.find(p => p.id == profileId);
-
-    if (!profile) {
-        showToast('Profile not found', 'error');
-        return;
-    }
-
-    // Create a copy with a new name
-    const newName = profile.name + ' (Copy)';
-
-    const profileData = {
-        id: null,
-        name: newName,
-        printer_name: printerName,
-        copies: profile.copies,
-        paper_size: profile.paper_size,
-        orientation: profile.orientation,
-        paper_source: profile.paper_source,
-        is_default: false,
-        calibration_ab: profile.calibration_ab,
-        calibration_bc: profile.calibration_bc,
-        calibration_cd: profile.calibration_cd,
-        calibration_da: profile.calibration_da,
-        border_top: profile.border_top,
-        border_right: profile.border_right,
-        border_bottom: profile.border_bottom,
-        border_left: profile.border_left
     };
 
-    try {
-        const result = await ipcRenderer.invoke('save-print-profile', profileData);
+    const footer = html`
+        <button class="btn btn-secondary" onClick=${onClose}>Cancel</button>
+        <button class="btn btn-primary" onClick=${handleSubmit}>Create Animal</button>
+    `;
 
-        if (result.success) {
-            showToast('Profile copied!', 'success');
+    return html`
+        <${Modal} isOpen=${isOpen} onClose=${onClose} title="Create New Animal" footer=${footer}>
+            <${AnimalForm}
+                animal=${initialData}
+                rescues=${rescues}
+                imageData=${imageData}
+                onImageChange=${setImageData}
+                formRef=${formRef}
+            />
+        <//>
+    `;
+}
 
-            // Refresh the management list
-            delete cachedProfiles[printerName];
-            await loadProfilesForManagement();
+// ============================================================
+// Edit Animal Modal
+// ============================================================
+function EditAnimalModal({ isOpen, onClose, animal, rescues, onSubmit, onDelete }) {
+    const [imageData, setImageData] = useState(null);
+    const [showAttributesModal, setShowAttributesModal] = useState(false);
+    const [showAIEditModal, setShowAIEditModal] = useState(false);
+    const [rescraping, setRescraping] = useState(false);
+    const formRef = useRef(null);
+    const showToast = useToast();
 
-            // Also refresh the print settings dropdown if same printer
-            const printSettingsPrinter = document.getElementById('printerSelect').value;
-            if (printSettingsPrinter === printerName) {
-                await loadPrintProfiles(printerName);
-            }
-        } else {
-            showToast('Error copying profile: ' + result.error, 'error');
+    useEffect(() => {
+        if (!isOpen) {
+            setImageData(null);
+            setShowAttributesModal(false);
+            setShowAIEditModal(false);
+            setRescraping(false);
         }
-    } catch (err) {
-        console.error('[App] Error copying profile:', err);
-        showToast('Error copying profile: ' + err.message, 'error');
-    }
-}
+    }, [isOpen]);
 
-// Helper functions
-function getPaperSizeLabel(size) {
-    const labels = {
-        'letter': 'Letter (8.5 x 11 in)',
-        'legal': 'Legal (8.5 x 14 in)',
-        'A4': 'A4 (210 x 297 mm)',
-        'A5': 'A5 (148 x 210 mm)'
-    };
-    return labels[size] || size;
-}
+    // Handle saving AI-edited image
+    const handleAIEditSave = async (editedImageDataUrl) => {
+        try {
+            // Convert data URL to image data format
+            const response = await fetch(editedImageDataUrl);
+            const blob = await response.blob();
+            const arrayBuffer = await blob.arrayBuffer();
+            const hex = Array.from(new Uint8Array(arrayBuffer))
+                .map(b => b.toString(16).padStart(2, '0'))
+                .join('');
+            const mime = blob.type || 'image/png';
 
-function getPaperSourceLabel(source) {
-    const labels = {
-        'default': 'Default',
-        'rear': 'Rear Tray'
-    };
-    return labels[source] || source;
-}
-
-function capitalizeFirst(str) {
-    if (!str) return '';
-    return str.charAt(0).toUpperCase() + str.slice(1);
-}
-
-function escapeHtml(text) {
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
-}
-
-async function confirmPrint() {
-    if (!currentPrintFilePath) {
-        showToast('No file to print', 'error');
-        return;
-    }
-
-    const printerSelect = document.getElementById('printerSelect');
-    const profileSelect = document.getElementById('printProfileSelect');
-    const copiesInput = document.getElementById('copiesInput');
-    const paperSizeSelect = document.getElementById('paperSizeSelect');
-    const orientationInput = document.querySelector('input[name="orientation"]:checked');
-    const paperSourceSelect = document.getElementById('paperSourceSelect');
-
-    const printerName = printerSelect.value;
-    const copies = parseInt(copiesInput.value) || 1;
-    const paperSize = paperSizeSelect.value;
-    const orientation = orientationInput ? orientationInput.value : 'landscape';
-    const paperSource = paperSourceSelect ? paperSourceSelect.value : 'default';
-
-    if (!printerName) {
-        showToast('Please select a printer', 'error');
-        return;
-    }
-
-    // Get calibration values from selected profile if any
-    let calibration_ab = null;
-    let calibration_bc = null;
-    let calibration_cd = null;
-    let calibration_da = null;
-    let border_top = null;
-    let border_right = null;
-    let border_bottom = null;
-    let border_left = null;
-
-    const profileId = profileSelect.value;
-    if (profileId) {
-        const profiles = cachedProfiles[printerName] || [];
-        const profile = profiles.find(p => p.id == profileId);
-        if (profile && profile.calibration_ab && profile.calibration_bc &&
-            profile.calibration_cd && profile.calibration_da) {
-            calibration_ab = profile.calibration_ab;
-            calibration_bc = profile.calibration_bc;
-            calibration_cd = profile.calibration_cd;
-            calibration_da = profile.calibration_da;
-            console.log('[App] Using calibration from profile:', {
-                ab: calibration_ab, bc: calibration_bc, cd: calibration_cd, da: calibration_da
+            setImageData({
+                hex,
+                mime,
+                path: 'ai-edited',
+                dataUrl: editedImageDataUrl
             });
+        } catch (err) {
+            console.error('Error processing AI edited image:', err);
         }
-        // Get border calibration values (0 is valid)
-        if (profile) {
-            border_top = profile.border_top;
-            border_right = profile.border_right;
-            border_bottom = profile.border_bottom;
-            border_left = profile.border_left;
-            if (border_top !== null || border_right !== null || border_bottom !== null || border_left !== null) {
-                console.log('[App] Using border calibration from profile:', {
-                    top: border_top, right: border_right, bottom: border_bottom, left: border_left
-                });
-            }
-        }
-    }
+    };
 
-    console.log('[App] Printing with settings:', {
-        printer: printerName,
-        copies,
-        paperSize,
-        orientation,
-        paperSource,
-        calibration: calibration_ab ? 'yes' : 'no',
-        borderCalibration: (border_top !== null || border_right !== null || border_bottom !== null || border_left !== null) ? 'yes' : 'no',
-        file: currentPrintFilePath
-    });
+    // Get current image URL for AI edit modal
+    const getCurrentImageUrl = () => {
+        return imageData?.dataUrl || animal?.imageDataUrl || null;
+    };
 
-    const confirmButton = document.getElementById('confirmPrintButton');
-    confirmButton.disabled = true;
-    confirmButton.textContent = 'Printing...';
+    const handleRescrape = async () => {
+        if (!animal || !formRef.current) return;
 
-    try {
-        const printResult = await ipcRenderer.invoke('print-image', currentPrintFilePath, {
-            showDialog: false,
-            printer: printerName,
-            copies: copies,
-            paperSize: paperSize,
-            orientation: orientation,
-            paperSource: paperSource,
-            calibration_ab: calibration_ab,
-            calibration_bc: calibration_bc,
-            calibration_cd: calibration_cd,
-            calibration_da: calibration_da,
-            border_top: border_top,
-            border_right: border_right,
-            border_bottom: border_bottom,
-            border_left: border_left
-        });
-
-        if (printResult.success) {
-            showToast('Sent to printer!', 'success');
-
-            // Auto-save profile if settings differ from the selected profile
-            if (profileId) {
-                const profiles = cachedProfiles[printerName] || [];
-                const profile = profiles.find(p => p.id == profileId);
-                if (profile) {
-                    const settingsChanged =
-                        profile.copies !== copies ||
-                        profile.paper_size !== paperSize ||
-                        profile.orientation !== orientation ||
-                        profile.paper_source !== paperSource;
-
-                    if (settingsChanged) {
-                        console.log('[App] Profile settings changed, auto-saving...');
-                        try {
-                            const updateResult = await ipcRenderer.invoke('save-print-profile', {
-                                id: parseInt(profileId),
-                                name: profile.name,
-                                printer_name: printerName,
-                                copies: copies,
-                                paper_size: paperSize,
-                                orientation: orientation,
-                                paper_source: paperSource,
-                                is_default: profile.is_default,
-                                calibration_ab: profile.calibration_ab,
-                                calibration_bc: profile.calibration_bc,
-                                calibration_cd: profile.calibration_cd,
-                                calibration_da: profile.calibration_da,
-                                border_top: profile.border_top,
-                                border_right: profile.border_right,
-                                border_bottom: profile.border_bottom,
-                                border_left: profile.border_left
-                            });
-                            if (updateResult.success) {
-                                console.log('[App] Profile auto-saved successfully');
-                                // Refresh cached profiles
-                                delete cachedProfiles[printerName];
-                            }
-                        } catch (err) {
-                            console.error('[App] Error auto-saving profile:', err);
-                        }
-                    }
-                }
-            }
-
-            closePrintSettingsModal();
-
-            // Call callback if provided
-            if (currentPrintCallback) {
-                currentPrintCallback(true);
-            }
-        } else {
-            showToast('Print error: ' + printResult.error, 'error');
-        }
-    } catch (err) {
-        console.error('[App] Error printing:', err);
-        showToast('Print error: ' + err.message, 'error');
-    } finally {
-        confirmButton.disabled = false;
-        confirmButton.textContent = 'Print';
-    }
-}
-
-// Close modal when clicking outside
-document.getElementById('rescueSelectModal').addEventListener('click', (e) => {
-    if (e.target.classList.contains('modal-overlay')) {
-        closeRescueSelectModal();
-    }
-});
-
-document.getElementById('createModal').addEventListener('click', (e) => {
-    if (e.target.classList.contains('modal-overlay')) {
-        closeCreateModal();
-    }
-});
-
-document.getElementById('manualEntryModal').addEventListener('click', (e) => {
-    if (e.target.classList.contains('modal-overlay')) {
-        closeManualEntryModal();
-    }
-});
-
-document.getElementById('editModal').addEventListener('click', (e) => {
-    if (e.target.classList.contains('modal-overlay')) {
-        closeModal();
-    }
-});
-
-document.getElementById('scrapeModal').addEventListener('click', (e) => {
-    if (e.target.classList.contains('modal-overlay')) {
-        closeScrapeModal();
-    }
-});
-
-document.getElementById('selectFromSiteModal').addEventListener('click', (e) => {
-    if (e.target.classList.contains('modal-overlay')) {
-        closeSelectFromSiteModal();
-    }
-});
-
-document.getElementById('deleteMultipleModal').addEventListener('click', (e) => {
-    if (e.target.classList.contains('modal-overlay')) {
-        closeDeleteMultipleModal();
-    }
-});
-
-document.getElementById('printMultipleModal').addEventListener('click', (e) => {
-    if (e.target.classList.contains('modal-overlay')) {
-        closePrintMultipleModal();
-    }
-});
-
-document.getElementById('printSettingsModal').addEventListener('click', (e) => {
-    if (e.target.classList.contains('modal-overlay')) {
-        closePrintSettingsModal();
-    }
-});
-
-document.getElementById('manageProfilesModal').addEventListener('click', (e) => {
-    if (e.target.classList.contains('modal-overlay')) {
-        closeManageProfilesModal();
-    }
-});
-
-document.getElementById('saveProfileModal').addEventListener('click', (e) => {
-    if (e.target.classList.contains('modal-overlay')) {
-        closeSaveProfileDialog();
-    }
-});
-
-// Delete Multiple Modal functions
-let selectedDeleteAnimalIds = new Set();
-
-function openDeleteMultipleModal() {
-    document.getElementById('deleteMultipleModal').classList.add('active');
-    selectedDeleteAnimalIds.clear();
-    renderDeleteAnimalGrid();
-}
-
-function closeDeleteMultipleModal() {
-    document.getElementById('deleteMultipleModal').classList.remove('active');
-    selectedDeleteAnimalIds.clear();
-}
-
-function renderDeleteAnimalGrid() {
-    const grid = document.getElementById('deleteAnimalGrid');
-    const deleteButton = document.getElementById('deleteButton');
-    const selectAllCheckbox = document.getElementById('deleteSelectAllCheckbox');
-
-    if (animals.length === 0) {
-        grid.innerHTML = '<div style="padding: 20px; text-align: center; color: #666;">No animals to delete.</div>';
-        deleteButton.disabled = true;
-        return;
-    }
-
-    let html = '';
-    for (const animal of animals) {
-        const isSelected = selectedDeleteAnimalIds.has(animal.id);
-        html += `
-            <div class="delete-animal-item ${isSelected ? 'selected' : ''}" onclick="toggleDeleteAnimal(${animal.id})">
-                <input type="checkbox" ${isSelected ? 'checked' : ''} onclick="event.stopPropagation(); toggleDeleteAnimal(${animal.id})">
-                ${animal.imageDataUrl
-                    ? `<img class="delete-animal-thumbnail" src="${animal.imageDataUrl}" alt="${animal.name}">`
-                    : `<div class="delete-animal-no-image">🐕</div>`
-                }
-                <div class="delete-animal-name">${animal.name}</div>
-            </div>
-        `;
-    }
-
-    grid.innerHTML = html;
-
-    // Update select all checkbox state
-    selectAllCheckbox.checked = selectedDeleteAnimalIds.size === animals.length && animals.length > 0;
-
-    updateDeleteButton();
-}
-
-function toggleDeleteAnimal(animalId) {
-    if (selectedDeleteAnimalIds.has(animalId)) {
-        selectedDeleteAnimalIds.delete(animalId);
-    } else {
-        selectedDeleteAnimalIds.add(animalId);
-    }
-    renderDeleteAnimalGrid();
-}
-
-function toggleDeleteSelectAll() {
-    const selectAllCheckbox = document.getElementById('deleteSelectAllCheckbox');
-
-    if (selectAllCheckbox.checked) {
-        // Select all
-        for (const animal of animals) {
-            selectedDeleteAnimalIds.add(animal.id);
-        }
-    } else {
-        // Deselect all
-        selectedDeleteAnimalIds.clear();
-    }
-
-    renderDeleteAnimalGrid();
-}
-
-function updateDeleteButton() {
-    const deleteButton = document.getElementById('deleteButton');
-    const count = selectedDeleteAnimalIds.size;
-
-    if (count > 0) {
-        deleteButton.disabled = false;
-        deleteButton.textContent = `Delete Selected (${count})`;
-    } else {
-        deleteButton.disabled = true;
-        deleteButton.textContent = 'Delete Selected';
-    }
-}
-
-async function deleteSelectedAnimals() {
-    if (selectedDeleteAnimalIds.size === 0) {
-        showToast('Please select at least one animal to delete', 'error');
-        return;
-    }
-
-    const count = selectedDeleteAnimalIds.size;
-    const animalNames = animals
-        .filter(a => selectedDeleteAnimalIds.has(a.id))
-        .map(a => a.name)
-        .slice(0, 3)
-        .join(', ');
-
-    const displayNames = count > 3 ? `${animalNames} and ${count - 3} more` : animalNames;
-
-    const confirmed = confirm(
-        `Are you sure you want to delete ${count} animal${count > 1 ? 's' : ''}?\n\n${displayNames}\n\nThis cannot be undone.`
-    );
-
-    if (!confirmed) return;
-
-    const deleteButton = document.getElementById('deleteButton');
-    const grid = document.getElementById('deleteAnimalGrid');
-
-    // Disable button during deletion
-    deleteButton.disabled = true;
-    const originalText = deleteButton.textContent;
-
-    try {
-        grid.innerHTML = '<div class="loading-spinner">Deleting animals...</div>';
-
-        const idsToDelete = Array.from(selectedDeleteAnimalIds);
-        deleteButton.textContent = `Deleting ${idsToDelete.length} animals...`;
-
-        const { successCount, failCount } = db.deleteAnimals(idsToDelete);
-
-        // Show summary
-        let message = `Deleted ${successCount} animal${successCount !== 1 ? 's' : ''}`;
-        if (failCount > 0) {
-            message += `, ${failCount} failed`;
-        }
-        showToast(message, failCount > 0 ? 'error' : 'success');
-
-        // Close modal and refresh animal list
-        closeDeleteMultipleModal();
-        await loadAnimals();
-
-    } catch (err) {
-        console.error('[App] Error during deletion:', err);
-        showToast(`Error deleting animals: ${err.message}`, 'error');
-        renderDeleteAnimalGrid();
-    } finally {
-        deleteButton.disabled = false;
-        deleteButton.textContent = originalText;
-    }
-}
-
-// Select from Site Modal functions
-let scrapedAnimals = [];
-let selectedAnimalUrls = new Set();
-
-async function openSelectFromSiteModal() {
-    document.getElementById('selectFromSiteModal').classList.add('active');
-    scrapedAnimals = [];
-    selectedAnimalUrls.clear();
-
-    const container = document.getElementById('animalListContainer');
-    const importButton = document.getElementById('importButton');
-
-    // Determine which rescue site to use
-    const rescueName = selectedRescue === 'adoptapet' ? 'Brass City Rescue (Adoptapet)' : 'Paws Rescue League (Wagtopia)';
-    container.innerHTML = `<div class="loading-spinner">Loading animals from ${rescueName}</div>`;
-    importButton.disabled = true;
-
-    try {
-        // Get the rescue info from the database based on selected rescue type
-        const rescue = db.getRescueByScraperType(selectedRescue);
-        if (!rescue) {
-            throw new Error(`Rescue not found for scraper type: ${selectedRescue}`);
-        }
-        console.log('[App] Using rescue:', rescue.name, 'org_id:', rescue.org_id);
-
-        // Call the appropriate list scraper via IPC (runs in main process where Puppeteer works)
-        let ipcChannel;
-        if (selectedRescue === 'adoptapet') {
-            ipcChannel = 'scrape-animal-list-adoptapet';
-        } else {
-            ipcChannel = 'scrape-animal-list-wagtopia';
-        }
-        console.log('[App] Calling IPC list scraper:', ipcChannel, 'with org_id:', rescue.org_id);
-
-        const result = await ipcRenderer.invoke(ipcChannel, rescue.org_id);
-
-        console.log('[App] List scraper completed');
-
-        if (!result.success) {
-            throw new Error(result.error);
-        }
-
-        scrapedAnimals = result.data;
-        console.log('[App] Scraped', scrapedAnimals.length, 'animals');
-
-        if (scrapedAnimals.length === 0) {
-            container.innerHTML = '<div style="padding: 20px; text-align: center; color: #666;">No animals found on the page.</div>';
+        const form = formRef.current;
+        const url = form.slug.value;
+        if (!url) {
+            showToast('No adoption URL to scrape from.', 'error');
             return;
         }
 
-        // Render the animal selection list
-        renderAnimalSelectionList();
-
-    } catch (err) {
-        console.error('[App] Error loading animal list:', err);
-        container.innerHTML = `<div style="padding: 20px; text-align: center; color: #dc3545;">Error loading animals: ${err.message}</div>`;
-    }
-}
-
-function closeSelectFromSiteModal() {
-    document.getElementById('selectFromSiteModal').classList.remove('active');
-    scrapedAnimals = [];
-    selectedAnimalUrls.clear();
-}
-
-function renderAnimalSelectionList() {
-    const container = document.getElementById('animalListContainer');
-    const importButton = document.getElementById('importButton');
-
-    // Save scroll position before re-rendering
-    const listElement = container.querySelector('.animal-select-list');
-    const scrollTop = listElement ? listElement.scrollTop : 0;
-
-    let html = '<div class="select-all-container">';
-    html += '<label><input type="checkbox" id="selectAllCheckbox" onchange="toggleSelectAll()"> Select All</label>';
-    html += '</div>';
-    html += '<div class="animal-select-list">';
-
-    for (const animal of scrapedAnimals) {
-        const isSelected = selectedAnimalUrls.has(animal.url);
-        html += `<div class="animal-select-item ${isSelected ? 'selected' : ''}" onclick="toggleAnimalSelection('${animal.url}')">`;
-        html += `<input type="checkbox" ${isSelected ? 'checked' : ''} onchange="event.stopPropagation(); toggleAnimalSelection('${animal.url}')">`;
-        html += `<label>${animal.name}</label>`;
-        html += '</div>';
-    }
-
-    html += '</div>';
-    container.innerHTML = html;
-
-    // Restore scroll position after re-rendering
-    const newListElement = container.querySelector('.animal-select-list');
-    if (newListElement && scrollTop > 0) {
-        newListElement.scrollTop = scrollTop;
-    }
-
-    updateImportButton();
-}
-
-function toggleAnimalSelection(url) {
-    if (selectedAnimalUrls.has(url)) {
-        selectedAnimalUrls.delete(url);
-    } else {
-        selectedAnimalUrls.add(url);
-    }
-
-    renderAnimalSelectionList();
-}
-
-function toggleSelectAll() {
-    const selectAllCheckbox = document.getElementById('selectAllCheckbox');
-
-    if (selectAllCheckbox.checked) {
-        // Select all
-        for (const animal of scrapedAnimals) {
-            selectedAnimalUrls.add(animal.url);
+        // Get the rescue to determine scraper type
+        const rescue = rescues.find(r => r.id === animal.rescue_id);
+        if (!rescue || !rescue.scraper_type) {
+            showToast('Cannot determine scraper type for this rescue.', 'error');
+            return;
         }
-    } else {
-        // Deselect all
-        selectedAnimalUrls.clear();
-    }
 
-    renderAnimalSelectionList();
+        setRescraping(true);
+        try {
+            const ipcChannel = rescue.scraper_type === 'adoptapet'
+                ? 'scrape-animal-page-adoptapet'
+                : 'scrape-animal-page-wagtopia';
+
+            const result = await ipcRenderer.invoke(ipcChannel, url);
+            if (!result.success) throw new Error(result.error);
+
+            const scrapedData = result.data;
+
+            // Update form fields
+            form.name.value = scrapedData.name || form.name.value;
+            form.breed.value = scrapedData.breed || form.breed.value;
+            form.age_long.value = scrapedData.age_long || form.age_long.value;
+            form.age_short.value = scrapedData.age_short || form.age_short.value;
+            form.size.value = scrapedData.size || form.size.value;
+            form.gender.value = scrapedData.gender || form.gender.value;
+            form.shots.value = scrapedData.shots ? '1' : '0';
+            form.housetrained.value = scrapedData.housetrained ? '1' : '0';
+            form.kids.value = scrapedData.kids || '?';
+            form.dogs.value = scrapedData.dogs || '?';
+            form.cats.value = scrapedData.cats || '?';
+            form.bio.value = scrapedData.bio || '';
+
+            // Update image if available
+            if (scrapedData.imageUrl) {
+                try {
+                    const imageResponse = await fetch(scrapedData.imageUrl);
+                    const imageBlob = await imageResponse.blob();
+                    const arrayBuffer = await imageBlob.arrayBuffer();
+                    const hex = Array.from(new Uint8Array(arrayBuffer))
+                        .map(b => b.toString(16).padStart(2, '0'))
+                        .join('');
+                    const mime = imageBlob.type || 'image/jpeg';
+                    const dataUrl = `data:${mime};base64,${btoa(String.fromCharCode(...new Uint8Array(arrayBuffer)))}`;
+
+                    setImageData({
+                        hex,
+                        mime,
+                        path: scrapedData.imageUrl,
+                        dataUrl
+                    });
+                } catch (imgErr) {
+                    console.error('Error fetching image:', imgErr);
+                }
+            }
+
+            // Update attributes if present
+            if (scrapedData.attributes && scrapedData.attributes.length > 0) {
+                db.updateAnimalAttributes(animal.id, scrapedData.attributes);
+            }
+
+            showToast('Data refreshed from adoption page!');
+        } catch (err) {
+            showToast(`Error scraping: ${err.message}`, 'error');
+        } finally {
+            setRescraping(false);
+        }
+    };
+
+    // Ref to track bio textarea value
+    const bioRef = useRef(null);
+
+    const handleSave = () => {
+        const data = getFormData(formRef, false); // Don't include bio from form
+        if (!data || !animal) return;
+
+        // Get bio from the separate textarea ref
+        data.bio = bioRef.current?.value || '';
+
+        const imageToSave = imageData ? { hex: imageData.hex, mime: imageData.mime, path: imageData.path } : null;
+
+        try {
+            db.updateAnimal(animal.id, data, imageToSave);
+            showToast(`${data.name} updated successfully!`);
+            onClose();
+            onSubmit();
+        } catch (err) {
+            showToast(`Error saving: ${err.message}`, 'error');
+        }
+    };
+
+    const handleDelete = () => {
+        if (!animal) return;
+        if (!confirm(`Are you sure you want to delete ${animal.name}? This cannot be undone.`)) return;
+
+        try {
+            db.deleteAnimal(animal.id);
+            showToast(`${animal.name} deleted successfully!`);
+            onClose();
+            onDelete();
+        } catch (err) {
+            showToast(`Error deleting: ${err.message}`, 'error');
+        }
+    };
+
+    const footer = html`
+        <button class="btn btn-danger" onClick=${handleDelete}>Delete</button>
+        <button class="btn btn-secondary" onClick=${onClose}>Cancel</button>
+        <button class="btn btn-primary" onClick=${handleSave}>Save Changes</button>
+    `;
+
+    return html`
+        <${Modal} isOpen=${isOpen} onClose=${onClose} footer=${footer} width="900px">
+            <div class="modal-two-column">
+                <div class="modal-column-left">
+                    <${AnimalForm}
+                        key=${animal?.id}
+                        animal=${animal}
+                        rescues=${rescues}
+                        imageData=${imageData}
+                        onImageChange=${setImageData}
+                        formRef=${formRef}
+                        onAIEdit=${() => setShowAIEditModal(true)}
+                        includeBio=${false}
+                    />
+                </div>
+                <div class="modal-column-right edit-animal-right-column">
+                    <${FormGroup} label="Bio" id="bio-edit">
+                        <textarea
+                            ref=${bioRef}
+                            id="bio-edit"
+                            placeholder="Enter the animal's bio/description..."
+                            defaultValue=${animal?.bio || ''}
+                        ></textarea>
+                    <//>
+                    <div class="edit-animal-buttons">
+                        <button
+                            class="btn btn-secondary"
+                            onClick=${() => setShowAttributesModal(true)}
+                        >
+                            Edit Flyer Attributes
+                        </button>
+                        <button
+                            class="btn btn-secondary"
+                            onClick=${handleRescrape}
+                            disabled=${rescraping}
+                        >
+                            ${rescraping ? 'Refreshing...' : 'Re-scrape from URL'}
+                        </button>
+                    </div>
+                </div>
+            </div>
+        <//>
+        <${EditAttributesModal}
+            isOpen=${showAttributesModal}
+            onClose=${() => setShowAttributesModal(false)}
+            animalId=${animal?.id}
+            animalName=${animal?.name}
+            onSave=${() => {}}
+        />
+        <${AIEditImageModal}
+            isOpen=${showAIEditModal}
+            onClose=${() => setShowAIEditModal(false)}
+            imageUrl=${getCurrentImageUrl()}
+            onSave=${handleAIEditSave}
+        />
+    `;
 }
 
-function updateImportButton() {
-    const importButton = document.getElementById('importButton');
-    const count = selectedAnimalUrls.size;
+// ============================================================
+// Edit Attributes Modal
+// ============================================================
+function EditAttributesModal({ isOpen, onClose, animalId, animalName, onSave }) {
+    const [attributes, setAttributes] = useState([]);
+    const [loading, setLoading] = useState(true);
+    const [generating, setGenerating] = useState(false);
+    const showToast = useToast();
 
-    if (count > 0) {
-        importButton.disabled = false;
-        importButton.textContent = `Import Selected (${count})`;
-    } else {
-        importButton.disabled = true;
-        importButton.textContent = 'Import Selected';
-    }
+    const handleGenerateWithAI = async () => {
+        // Get the API key from settings
+        const apiKey = db.getSetting('openai_api_key');
+        if (!apiKey) {
+            showToast('Please set your OpenAI API key in Settings first.', 'error');
+            return;
+        }
+
+        // Get the animal's bio
+        const animal = db.getAnimalById(animalId);
+        if (!animal || !animal.bio) {
+            showToast('This animal has no bio to generate attributes from.', 'error');
+            return;
+        }
+
+        setGenerating(true);
+        try {
+            const prompt = `Given the following bio for this adoptable pet, I want you to return 16 positive, eloquent adjectives like Loyal, Playful, Cuddly, Loving, High Energy, etc about the animal. Each trait should start with an uppercase letter. Only respond with a newline separated list of the 16 words.\n\nBio:\n${animal.bio}`;
+
+            const response = await fetch('https://api.openai.com/v1/chat/completions', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${apiKey}`
+                },
+                body: JSON.stringify({
+                    model: 'gpt-4.1-mini',
+                    messages: [
+                        { role: 'user', content: prompt }
+                    ],
+                    temperature: 0.7
+                })
+            });
+
+            if (!response.ok) {
+                const errorData = await response.json().catch(() => ({}));
+                throw new Error(errorData.error?.message || `API request failed: ${response.status}`);
+            }
+
+            const data = await response.json();
+            const content = data.choices?.[0]?.message?.content || '';
+
+            // Parse the newline-separated response
+            const generatedAttrs = content
+                .split('\n')
+                .map(line => line.trim())
+                .filter(line => line.length > 0)
+                .slice(0, 16);
+
+            // Pad to 16 slots if needed
+            while (generatedAttrs.length < 16) {
+                generatedAttrs.push('');
+            }
+
+            setAttributes(generatedAttrs);
+            showToast('Attributes generated successfully!');
+        } catch (err) {
+            showToast(`Error generating attributes: ${err.message}`, 'error');
+        } finally {
+            setGenerating(false);
+        }
+    };
+
+    useEffect(() => {
+        if (!isOpen || !animalId) return;
+        setLoading(true);
+        try {
+            const attrs = db.getAnimalAttributes(animalId);
+            // Ensure we have an array of 16 slots (empty strings for unfilled)
+            const padded = [...attrs];
+            while (padded.length < 16) padded.push('');
+            setAttributes(padded);
+        } catch (err) {
+            showToast(`Error loading attributes: ${err.message}`, 'error');
+            setAttributes(Array(16).fill(''));
+        } finally {
+            setLoading(false);
+        }
+    }, [isOpen, animalId]);
+
+    const handleChange = (index, value) => {
+        setAttributes(prev => {
+            const next = [...prev];
+            next[index] = value;
+            return next;
+        });
+    };
+
+    const handleMoveUp = (index) => {
+        if (index === 0) return;
+        setAttributes(prev => {
+            const next = [...prev];
+            [next[index - 1], next[index]] = [next[index], next[index - 1]];
+            return next;
+        });
+    };
+
+    const handleMoveDown = (index) => {
+        if (index >= 15) return;
+        setAttributes(prev => {
+            const next = [...prev];
+            [next[index], next[index + 1]] = [next[index + 1], next[index]];
+            return next;
+        });
+    };
+
+    const handleDelete = (index) => {
+        setAttributes(prev => {
+            const next = [...prev];
+            next.splice(index, 1);
+            next.push(''); // Keep 16 slots
+            return next;
+        });
+    };
+
+    const handleSave = () => {
+        try {
+            // Filter out empty strings and save
+            const cleanAttrs = attributes.filter(a => a.trim());
+            db.updateAnimalAttributes(animalId, cleanAttrs);
+            showToast('Attributes saved successfully!');
+            onSave && onSave();
+            onClose();
+        } catch (err) {
+            showToast(`Error saving attributes: ${err.message}`, 'error');
+        }
+    };
+
+    const footer = html`
+        <button class="btn btn-secondary" onClick=${onClose}>Cancel</button>
+        <button class="btn btn-primary" onClick=${handleSave}>Save Attributes</button>
+    `;
+
+    const filledCount = attributes.filter(a => a.trim()).length;
+
+    return html`
+        <${Modal} isOpen=${isOpen} onClose=${onClose} title=${`Edit Attributes - ${animalName || 'Animal'}`} footer=${footer} width="600px">
+            <p style="color: #666; margin-bottom: 15px;">
+                Add up to 16 attributes that will appear on the adoption flyer.
+                These are displayed as a list of traits (e.g., "Labrador Mix", "2 Years", "Housetrained").
+            </p>
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                <p style="color: #888; font-size: 0.85rem; margin: 0;">
+                    ${filledCount}/16 attributes used
+                </p>
+                <button
+                    class="btn btn-secondary"
+                    onClick=${handleGenerateWithAI}
+                    disabled=${generating || loading}
+                    style="padding: 8px 16px; font-size: 0.85rem;"
+                >
+                    ${generating ? 'Generating...' : 'Generate with AI'}
+                </button>
+            </div>
+            ${loading ? html`<p>Loading...</p>` : html`
+                <div class="attributes-list">
+                    ${attributes.map((attr, i) => html`
+                        <div key=${i} class="attribute-row" style="display: flex; gap: 8px; margin-bottom: 8px; align-items: center;">
+                            <span style="width: 24px; color: #888; font-size: 0.85rem;">${i + 1}.</span>
+                            <input
+                                type="text"
+                                value=${attr}
+                                onInput=${(e) => handleChange(i, e.target.value)}
+                                placeholder=${`Attribute ${i + 1}`}
+                                style="flex: 1;"
+                                maxlength="50"
+                            />
+                            <button
+                                class="btn btn-small"
+                                onClick=${() => handleMoveUp(i)}
+                                disabled=${i === 0}
+                                title="Move up"
+                                style="padding: 4px 8px;"
+                            >↑</button>
+                            <button
+                                class="btn btn-small"
+                                onClick=${() => handleMoveDown(i)}
+                                disabled=${i >= 15}
+                                title="Move down"
+                                style="padding: 4px 8px;"
+                            >↓</button>
+                            <button
+                                class="btn btn-small btn-danger"
+                                onClick=${() => handleDelete(i)}
+                                title="Remove"
+                                style="padding: 4px 8px;"
+                            >×</button>
+                        </div>
+                    `)}
+                </div>
+            `}
+        <//>
+    `;
 }
 
-async function importSelectedAnimals() {
-    if (selectedAnimalUrls.size === 0) {
-        showToast('Please select at least one animal', 'error');
-        return;
-    }
+// ============================================================
+// Select From Site Modal
+// ============================================================
+function SelectFromSiteModal({ isOpen, onClose, selectedRescue, onImportComplete }) {
+    const [animals, setAnimals] = useState([]);
+    const [selectedUrls, setSelectedUrls] = useState(new Set());
+    const [loading, setLoading] = useState(true);
+    const [importing, setImporting] = useState(false);
+    const [importStatus, setImportStatus] = useState('');
+    const showToast = useToast();
 
-    const importButton = document.getElementById('importButton');
-    const container = document.getElementById('animalListContainer');
+    useEffect(() => {
+        if (!isOpen) return;
+        setLoading(true);
+        setAnimals([]);
+        setSelectedUrls(new Set());
 
-    // Disable the button during import
-    importButton.disabled = true;
-    const originalText = importButton.textContent;
+        (async () => {
+            try {
+                const rescue = db.getRescueByScraperType(selectedRescue);
+                if (!rescue) throw new Error(`Rescue not found for scraper type: ${selectedRescue}`);
 
-    const urlsToImport = Array.from(selectedAnimalUrls);
-    let successCount = 0;
-    let failCount = 0;
+                const ipcChannel = selectedRescue === 'adoptapet'
+                    ? 'scrape-animal-list-adoptapet'
+                    : 'scrape-animal-list-wagtopia';
 
-    try {
-        container.innerHTML = '<div class="loading-spinner">Importing animals...</div>';
+                const result = await ipcRenderer.invoke(ipcChannel, rescue.org_id);
+                if (!result.success) throw new Error(result.error);
 
-        for (let i = 0; i < urlsToImport.length; i++) {
-            const url = urlsToImport[i];
-            const animalName = scrapedAnimals.find(a => a.url === url)?.name || 'Unknown';
+                setAnimals(result.data);
+            } catch (err) {
+                showToast(`Error loading animals: ${err.message}`, 'error');
+            } finally {
+                setLoading(false);
+            }
+        })();
+    }, [isOpen, selectedRescue]);
 
-            importButton.textContent = `Importing ${i + 1}/${urlsToImport.length}: ${animalName}`;
-            console.log(`[App] Importing ${i + 1}/${urlsToImport.length}: ${animalName}`);
+    const toggleSelection = (url) => {
+        setSelectedUrls(prev => {
+            const next = new Set(prev);
+            if (next.has(url)) next.delete(url);
+            else next.add(url);
+            return next;
+        });
+    };
+
+    const toggleSelectAll = () => {
+        if (selectedUrls.size === animals.length) {
+            setSelectedUrls(new Set());
+        } else {
+            setSelectedUrls(new Set(animals.map(a => a.url)));
+        }
+    };
+
+    const handleImport = async () => {
+        if (selectedUrls.size === 0) {
+            showToast('Please select at least one animal', 'error');
+            return;
+        }
+
+        setImporting(true);
+        let successCount = 0;
+        let failCount = 0;
+        const urls = Array.from(selectedUrls);
+
+        for (let i = 0; i < urls.length; i++) {
+            const url = urls[i];
+            const animalName = animals.find(a => a.url === url)?.name || 'Unknown';
+            setImportStatus(`Importing ${i + 1}/${urls.length}: ${animalName}`);
 
             try {
-                // Call the scraper directly
-                const scrapedData = await scrapeAnimalPage(url);
-                console.log('[App] Scraped data for:', scrapedData.name);
+                const ipcChannel = selectedRescue === 'adoptapet'
+                    ? 'scrape-animal-page-adoptapet'
+                    : 'scrape-animal-page-wagtopia';
 
-                // Load image if available
+                const result = await ipcRenderer.invoke(ipcChannel, url);
+                if (!result.success) throw new Error(result.error);
+
+                const scrapedData = result.data;
                 let imageData = null;
+
                 if (scrapedData.imagePath) {
                     try {
                         const imagePath = path.isAbsolute(scrapedData.imagePath)
                             ? scrapedData.imagePath
                             : path.join(APP_PATH, scrapedData.imagePath);
-
-                        const data = fs.readFileSync(imagePath);
-                        const ext = imagePath.split('.').pop().toLowerCase();
-                        const mimeTypes = {
-                            'jpg': 'image/jpeg',
-                            'jpeg': 'image/jpeg',
-                            'png': 'image/png',
-                            'gif': 'image/gif',
-                            'webp': 'image/webp'
-                        };
-                        const mime = mimeTypes[ext] || 'image/jpeg';
-
-                        let hexString = '';
-                        for (let j = 0; j < data.length; j++) {
-                            hexString += data[j].toString(16).padStart(2, '0');
-                        }
-
-                        imageData = {
-                            hex: hexString,
-                            mime: mime,
-                            path: path.basename(imagePath)
-                        };
+                        const buffer = fs.readFileSync(imagePath);
+                        imageData = bufferToImageData(buffer, imagePath);
+                        fs.unlinkSync(imagePath);
                     } catch (imgErr) {
-                        console.error('[App] Error loading image:', imgErr);
+                        console.error('Error loading image:', imgErr);
                     }
                 }
 
-                // Get the rescue_id for the current selected rescue
-                const currentRescue = db.getRescueByScraperType(selectedRescue);
-                const rescueId = currentRescue ? currentRescue.id : 1;
-
-                // Insert into database
+                const rescue = db.getRescueByScraperType(selectedRescue);
                 const animalData = {
                     name: scrapedData.name,
                     breed: scrapedData.breed,
@@ -2334,798 +1506,2923 @@ async function importSelectedAnimals() {
                     kids: scrapedData.kids,
                     dogs: scrapedData.dogs,
                     cats: scrapedData.cats,
-                    rescue_id: rescueId
+                    bio: scrapedData.bio || '',
+                    rescue_id: rescue?.id || 1,
+                    attributes: scrapedData.attributes || []
                 };
 
-                db.createAnimal(animalData, imageData);
-                console.log('[App] Successfully imported:', scrapedData.name);
+                db.createAnimal(animalData, imageData ? { hex: imageData.hex, mime: imageData.mime, path: imageData.path } : null);
                 successCount++;
-
-                // Clean up temporary image file
-                if (scrapedData.imagePath) {
-                    try {
-                        const imagePath = path.isAbsolute(scrapedData.imagePath)
-                            ? scrapedData.imagePath
-                            : path.join(APP_PATH, scrapedData.imagePath);
-                        fs.unlinkSync(imagePath);
-                    } catch (cleanupErr) {
-                        console.error('[App] Error cleaning up temp file:', cleanupErr);
-                    }
-                }
-
             } catch (err) {
-                console.error(`[App] Error importing ${animalName}:`, err);
+                console.error(`Error importing ${animalName}:`, err);
                 failCount++;
             }
         }
 
-        // Show summary
-        let message = `Import complete: ${successCount} succeeded`;
-        if (failCount > 0) {
-            message += `, ${failCount} failed`;
-        }
+        setImporting(false);
+        setImportStatus('');
+
+        const message = `Import complete: ${successCount} succeeded${failCount > 0 ? `, ${failCount} failed` : ''}`;
         showToast(message, failCount > 0 ? 'error' : 'success');
 
-        // Close modal and refresh animal list
-        closeSelectFromSiteModal();
-        await loadAnimals();
+        onClose();
+        onImportComplete();
+    };
 
-    } catch (err) {
-        console.error('[App] Error during import:', err);
-        showToast(`Error importing animals: ${err.message}`, 'error');
-    } finally {
-        importButton.disabled = false;
-        importButton.textContent = originalText;
-    }
-}
+    const footer = html`
+        <button class="btn btn-secondary" onClick=${onClose} disabled=${importing}>Cancel</button>
+        <button class="btn btn-primary" onClick=${handleImport} disabled=${importing || selectedUrls.size === 0}>
+            ${importing ? importStatus : `Import Selected (${selectedUrls.size})`}
+        </button>
+    `;
 
-// Note: Click handlers for image containers are now inline in HTML
+    const rescueName = selectedRescue === 'adoptapet' ? 'Adoptapet' : 'Wagtopia';
 
-// ============================================================
-// Print Calibration Functions
-// ============================================================
-
-let expectedCalibrationDistance = 100; // Will be loaded from backend
-let expectedBorderInset = 5; // Will be loaded from backend
-
-// Load calibration info from backend
-async function loadCalibrationInfo() {
-    try {
-        const result = await ipcRenderer.invoke('get-calibration-info');
-        if (result.success) {
-            expectedCalibrationDistance = result.expectedDistance;
-            expectedBorderInset = result.expectedBorderInset || 5;
-            const distanceDisplay = document.getElementById('expectedDistanceDisplay');
-            if (distanceDisplay) {
-                distanceDisplay.textContent = expectedCalibrationDistance;
-            }
-            const borderDisplay = document.getElementById('expectedBorderDisplay');
-            if (borderDisplay) {
-                borderDisplay.textContent = expectedBorderInset;
-            }
-        }
-    } catch (err) {
-        console.error('[App] Error loading calibration info:', err);
-    }
-}
-
-// Print calibration test page
-async function printCalibrationPage() {
-    const printerName = document.getElementById('saveProfilePrinterName').value ||
-                       document.getElementById('printerSelect').value;
-
-    if (!printerName) {
-        showToast('Please select a printer first', 'error');
-        return;
-    }
-
-    try {
-        showToast('Printing calibration test page...', 'success');
-
-        const result = await ipcRenderer.invoke('print-calibration-page', {
-            printer: printerName,
-            showDialog: false,
-            paperSize: document.getElementById('paperSizeSelect')?.value || 'letter',
-            paperSource: document.getElementById('paperSourceSelect')?.value || 'default'
-        });
-
-        if (result.success) {
-            showToast('Calibration page sent to printer', 'success');
-        } else {
-            showToast('Error printing calibration page: ' + result.error, 'error');
-        }
-    } catch (err) {
-        console.error('[App] Error printing calibration page:', err);
-        showToast('Error printing calibration page: ' + err.message, 'error');
-    }
-}
-
-// Clear calibration values
-function clearCalibration() {
-    // Default the 100mm square calibration test values to 100
-    document.getElementById('calibrationAB').value = '100';
-    document.getElementById('calibrationBC').value = '100';
-    document.getElementById('calibrationCD').value = '100';
-    document.getElementById('calibrationDA').value = '100';
-    document.getElementById('borderTop').value = '';
-    document.getElementById('borderRight').value = '';
-    document.getElementById('borderBottom').value = '';
-    document.getElementById('borderLeft').value = '';
-    updateCalibrationStatus();
-}
-
-// Update calibration status indicator
-function updateCalibrationStatus() {
-    const ab = parseFloat(document.getElementById('calibrationAB').value);
-    const bc = parseFloat(document.getElementById('calibrationBC').value);
-    const cd = parseFloat(document.getElementById('calibrationCD').value);
-    const da = parseFloat(document.getElementById('calibrationDA').value);
-
-    const statusEl = document.getElementById('calibrationStatus');
-    if (!statusEl) return;
-
-    if (ab && bc && cd && da && ab > 0 && bc > 0 && cd > 0 && da > 0) {
-        statusEl.textContent = 'Calibrated';
-        statusEl.className = 'calibration-status calibrated';
-    } else {
-        statusEl.textContent = 'Not Calibrated';
-        statusEl.className = 'calibration-status not-calibrated';
-    }
-}
-
-// Get calibration values from inputs
-function getCalibrationValues() {
-    const ab = parseFloat(document.getElementById('calibrationAB').value) || null;
-    const bc = parseFloat(document.getElementById('calibrationBC').value) || null;
-    const cd = parseFloat(document.getElementById('calibrationCD').value) || null;
-    const da = parseFloat(document.getElementById('calibrationDA').value) || null;
-
-    // Border calibration values (0 is valid, so use different check)
-    const borderTopEl = document.getElementById('borderTop');
-    const borderRightEl = document.getElementById('borderRight');
-    const borderBottomEl = document.getElementById('borderBottom');
-    const borderLeftEl = document.getElementById('borderLeft');
-
-    const borderTop = borderTopEl && borderTopEl.value !== '' ? parseFloat(borderTopEl.value) : null;
-    const borderRight = borderRightEl && borderRightEl.value !== '' ? parseFloat(borderRightEl.value) : null;
-    const borderBottom = borderBottomEl && borderBottomEl.value !== '' ? parseFloat(borderBottomEl.value) : null;
-    const borderLeft = borderLeftEl && borderLeftEl.value !== '' ? parseFloat(borderLeftEl.value) : null;
-
-    if (ab && bc && cd && da) {
-        return {
-            ab, bc, cd, da,
-            borderTop, borderRight, borderBottom, borderLeft
-        };
-    }
-    return null;
-}
-
-// Set calibration values in inputs
-function setCalibrationValues(profile) {
-    document.getElementById('calibrationAB').value = profile.calibration_ab || '';
-    document.getElementById('calibrationBC').value = profile.calibration_bc || '';
-    document.getElementById('calibrationCD').value = profile.calibration_cd || '';
-    document.getElementById('calibrationDA').value = profile.calibration_da || '';
-    document.getElementById('borderTop').value = profile.border_top !== null && profile.border_top !== undefined ? profile.border_top : '';
-    document.getElementById('borderRight').value = profile.border_right !== null && profile.border_right !== undefined ? profile.border_right : '';
-    document.getElementById('borderBottom').value = profile.border_bottom !== null && profile.border_bottom !== undefined ? profile.border_bottom : '';
-    document.getElementById('borderLeft').value = profile.border_left !== null && profile.border_left !== undefined ? profile.border_left : '';
-    updateCalibrationStatus();
-}
-
-// Add event listeners for calibration inputs to update status
-document.addEventListener('DOMContentLoaded', () => {
-    const calibrationInputs = ['calibrationAB', 'calibrationBC', 'calibrationCD', 'calibrationDA'];
-    calibrationInputs.forEach(id => {
-        const el = document.getElementById(id);
-        if (el) {
-            el.addEventListener('input', updateCalibrationStatus);
-        }
-    });
-
-    // Load calibration info
-    loadCalibrationInfo();
-});
-
-// Initialize app when DOM is ready
-document.addEventListener('DOMContentLoaded', async () => {
-    log('========== Electron app ready ==========');
-
-    // Setup paths and initialize database
-    try {
-        await setupPaths();
-    } catch (err) {
-        console.error('[App] Failed to initialize:', err);
-        const content = document.getElementById('content');
-        if (content) {
-            content.innerHTML = `
-                <div class="error">
-                    <h3>Initialization Failed</h3>
-                    <p>${err.message}</p>
-                    <p>Please ensure sql.js is installed correctly.</p>
+    return html`
+        <${Modal} isOpen=${isOpen} onClose=${onClose} title="Select Animals from ${rescueName}" footer=${footer}>
+            ${loading ? html`
+                <div class="loading-spinner">Loading animals from ${rescueName}</div>
+            ` : animals.length === 0 ? html`
+                <div style="padding: 20px; text-align: center; color: #666;">No animals found.</div>
+            ` : html`
+                <div class="select-all-container">
+                    <label>
+                        <input
+                            type="checkbox"
+                            checked=${selectedUrls.size === animals.length}
+                            onChange=${toggleSelectAll}
+                        />
+                        Select All
+                    </label>
                 </div>
-            `;
-        }
-        return;
-    }
-
-    // Load animals after initialization
-    await loadAnimals();
-});
-
-// Card generation queue
-let cardGenerationQueue = [];
-let isProcessingQueue = false;
-
-async function processCardGenerationQueue() {
-    if (isProcessingQueue || cardGenerationQueue.length === 0) {
-        return;
-    }
-
-    isProcessingQueue = true;
-
-    while (cardGenerationQueue.length > 0) {
-        const task = cardGenerationQueue.shift();
-        const animal = animals.find(a => a.id === task.animalId);
-
-        if (!animal) {
-            console.error('[Queue] Animal not found:', task.animalId);
-            continue;
-        }
-
-        try {
-            console.log('[Queue] Processing card generation for:', animal.name);
-            showToast(`Generating cards for ${animal.name}... (${cardGenerationQueue.length} in queue)`);
-
-            // Generate front card first
-            await printCardFront(task.animalId);
-
-            // Then generate back card
-            await printCardBack(task.animalId);
-
-            showToast(`Cards generated for ${animal.name}!`);
-        } catch (err) {
-            console.error('[Queue] Error generating cards for', animal.name, ':', err);
-            showToast(`Error generating cards for ${animal.name}: ${err.message}`, 'error');
-        }
-    }
-
-    isProcessingQueue = false;
-    console.log('[Queue] Queue processing complete');
-}
-
-// Generate cards function
-async function generateCards(animalId) {
-    const animal = animals.find(a => a.id === animalId);
-    if (!animal) {
-        showToast('Animal not found', 'error');
-        return;
-    }
-
-    // Add to queue
-    cardGenerationQueue.push({ animalId });
-    console.log('[Queue] Added', animal.name, 'to queue. Queue length:', cardGenerationQueue.length);
-
-    showToast(`${animal.name} added to generation queue (position ${cardGenerationQueue.length})`);
-
-    // Start processing the queue
-    processCardGenerationQueue();
-}
-
-// Print card functions
-async function printCardFront(animalId) {
-    const animal = animals.find(a => a.id === animalId);
-    if (!animal) {
-        showToast('Animal not found', 'error');
-        return;
-    }
-
-    let tempImagePath = null;
-
-    try {
-        showToast(`Generating card front for ${animal.name}...`);
-        console.log('[App] Starting card generation for animal:', animal.name);
-
-        // Write portrait data to temporary file if available
-        let portraitFilePath = null;
-        if (animal.imageDataUrl) {
-            // Extract base64 data from data URL
-            const base64Match = animal.imageDataUrl.match(/base64,(.+)/);
-            if (base64Match) {
-                const portraitData = base64Match[1];
-                console.log('[App] Portrait data extracted, length:', portraitData.length);
-
-                // Write to temporary file
-                tempImagePath = path.join(TMP_DIR, `portrait-${animal.id}-${Date.now()}.jpg`);
-                console.log('[App] Writing portrait to temp file:', tempImagePath);
-
-                // Convert base64 to binary buffer
-                const buffer = Buffer.from(portraitData, 'base64');
-                fs.writeFileSync(tempImagePath, buffer);
-                console.log('[App] Portrait written to temp file');
-                portraitFilePath = tempImagePath;
-            } else {
-                console.log('[App] No base64 match in imageDataUrl');
-            }
-        } else {
-            console.log('[App] No imageDataUrl available');
-        }
-
-        // Get rescue info for this animal
-        const rescue = db.getRescueById(animal.rescue_id || 1);
-        console.log('[App] Using rescue:', rescue ? rescue.name : 'default');
-
-        // Prepare parameters for card generation
-        const params = {
-            name: animal.name,
-            breed: animal.breed,
-            ageShort: animal.age_short,
-            ageLong: animal.age_long,
-            size: animal.size,
-            gender: animal.gender,
-            shots: animal.shots,
-            housetrained: animal.housetrained,
-            kids: animal.kids,
-            dogs: animal.dogs,
-            cats: animal.cats,
-            slug: animal.slug,
-            portraitPath: animal.portrait_path || 'portrait.jpg',
-            portraitFilePath: portraitFilePath,
-            rescueName: rescue ? rescue.name : 'Paws Rescue League',
-            rescueWebsite: rescue ? rescue.website : 'pawsrescueleague.org',
-            rescueLogo: rescue ? rescue.logo_path : 'logo.png',
-            rescueLogoData: rescue && rescue.logo_data ? Buffer.from(rescue.logo_data).toString('base64') : null,
-            rescueLogoMime: rescue ? rescue.logo_mime : null
-        };
-
-        console.log('[App] Parameters prepared:', JSON.stringify({...params, rescueLogoData: params.rescueLogoData ? '[BASE64]' : null}));
-
-        // Call the card generation function directly (no subprocess needed)
-        const outputPath = await generateCardFront(params);
-        console.log('[App] Card generated at:', outputPath);
-
-        // Clean up temporary file
-        if (tempImagePath) {
-            try {
-                fs.unlinkSync(tempImagePath);
-                console.log('[App] Cleaned up temp file:', tempImagePath);
-            } catch (cleanupErr) {
-                console.error('[App] Error cleaning up temp file:', cleanupErr);
-            }
-        }
-
-        // Platform-specific handling
-        if (process.platform === 'win32') {
-            // Windows: Open in-app print dialog
-            console.log('[App] Opening print settings dialog...');
-            openPrintSettingsModal(outputPath, (success) => {
-                if (success) {
-                    console.log('[App] Card front printed successfully');
-                }
-            });
-        } else {
-            // Linux/macOS: Open in GIMP
-            console.log('[App] Opening GIMP...');
-            const gimpResult = await ipcRenderer.invoke('open-in-gimp', outputPath);
-            if (gimpResult.success) {
-                console.log('[App] GIMP launched successfully');
-                showToast(`Card front generated for ${animal.name}!`);
-            } else {
-                console.error('[App] Error launching GIMP:', gimpResult.error);
-                showToast('Could not launch GIMP. Is it installed?', 'error');
-            }
-        }
-    } catch (err) {
-        console.error('[App] Error printing card front:', err);
-        console.error('[App] Error stack:', err.stack);
-        showToast(`Error generating card: ${err.message}`, 'error');
-
-        // Clean up temporary file on error
-        if (tempImagePath) {
-            try {
-                fs.unlinkSync(tempImagePath);
-                console.log('[App] Cleaned up temp file after error:', tempImagePath);
-            } catch (cleanupErr) {
-                console.error('[App] Error cleaning up temp file after error:', cleanupErr);
-            }
-        }
-    }
-}
-
-async function printCardBack(animalId) {
-    const animal = animals.find(a => a.id === animalId);
-    if (!animal) {
-        showToast('Animal not found', 'error');
-        return;
-    }
-
-    let tempImagePath = null;
-
-    try {
-        showToast(`Generating card back for ${animal.name}...`);
-        console.log('[App] Starting card back generation for animal:', animal.name);
-
-        // Write portrait data to temporary file if available
-        let portraitFilePath = null;
-        if (animal.imageDataUrl) {
-            // Extract base64 data from data URL
-            const base64Match = animal.imageDataUrl.match(/base64,(.+)/);
-            if (base64Match) {
-                const portraitData = base64Match[1];
-                console.log('[App] Portrait data extracted, length:', portraitData.length);
-
-                // Write to temporary file
-                tempImagePath = path.join(TMP_DIR, `portrait-${animal.id}-${Date.now()}.jpg`);
-                console.log('[App] Writing portrait to temp file:', tempImagePath);
-
-                // Convert base64 to binary buffer
-                const buffer = Buffer.from(portraitData, 'base64');
-                fs.writeFileSync(tempImagePath, buffer);
-                console.log('[App] Portrait written to temp file');
-                portraitFilePath = tempImagePath;
-            } else {
-                console.log('[App] No base64 match in imageDataUrl');
-            }
-        } else {
-            console.log('[App] No imageDataUrl available');
-        }
-
-        // Get rescue info for this animal
-        const rescue = db.getRescueById(animal.rescue_id || 1);
-        console.log('[App] Using rescue:', rescue ? rescue.name : 'default');
-
-        // Prepare parameters for card generation
-        const params = {
-            name: animal.name,
-            breed: animal.breed,
-            ageShort: animal.age_short,
-            ageLong: animal.age_long,
-            size: animal.size,
-            gender: animal.gender,
-            shots: animal.shots,
-            housetrained: animal.housetrained,
-            kids: animal.kids,
-            dogs: animal.dogs,
-            cats: animal.cats,
-            slug: animal.slug,
-            portraitPath: animal.portrait_path || 'portrait.jpg',
-            portraitFilePath: portraitFilePath,
-            rescueName: rescue ? rescue.name : 'Paws Rescue League',
-            rescueWebsite: rescue ? rescue.website : 'pawsrescueleague.org',
-            rescueLogo: rescue ? rescue.logo_path : 'logo.png',
-            rescueLogoData: rescue && rescue.logo_data ? Buffer.from(rescue.logo_data).toString('base64') : null,
-            rescueLogoMime: rescue ? rescue.logo_mime : null
-        };
-
-        console.log('[App] Parameters prepared:', JSON.stringify({...params, rescueLogoData: params.rescueLogoData ? '[BASE64]' : null}));
-
-        // Call the card generation function directly (no subprocess needed)
-        const outputPath = await generateCardBack(params);
-        console.log('[App] Card generated at:', outputPath);
-
-        // Clean up temporary file
-        if (tempImagePath) {
-            try {
-                fs.unlinkSync(tempImagePath);
-                console.log('[App] Cleaned up temp file:', tempImagePath);
-            } catch (cleanupErr) {
-                console.error('[App] Error cleaning up temp file:', cleanupErr);
-            }
-        }
-
-        // Platform-specific handling
-        if (process.platform === 'win32') {
-            // Windows: Open in-app print dialog
-            console.log('[App] Opening print settings dialog...');
-            openPrintSettingsModal(outputPath, (success) => {
-                if (success) {
-                    console.log('[App] Card back printed successfully');
-                }
-            });
-        } else {
-            // Linux/macOS: Open in GIMP
-            console.log('[App] Opening GIMP...');
-            const gimpResult = await ipcRenderer.invoke('open-in-gimp', outputPath);
-            if (gimpResult.success) {
-                console.log('[App] GIMP launched successfully');
-                showToast(`Card back generated for ${animal.name}!`);
-            } else {
-                console.error('[App] Error launching GIMP:', gimpResult.error);
-                showToast('Could not launch GIMP. Is it installed?', 'error');
-            }
-        }
-    } catch (err) {
-        console.error('[App] Error printing card back:', err);
-        console.error('[App] Error stack:', err.stack);
-        showToast(`Error generating card: ${err.message}`, 'error');
-
-        // Clean up temporary file on error
-        if (tempImagePath) {
-            try {
-                fs.unlinkSync(tempImagePath);
-                console.log('[App] Cleaned up temp file after error:', tempImagePath);
-            } catch (cleanupErr) {
-                console.error('[App] Error cleaning up temp file after error:', cleanupErr);
-            }
-        }
-    }
+                <div class="animal-select-list">
+                    ${animals.map(animal => html`
+                        <div
+                            key=${animal.url}
+                            class="animal-select-item ${selectedUrls.has(animal.url) ? 'selected' : ''}"
+                            onClick=${() => toggleSelection(animal.url)}
+                        >
+                            <input
+                                type="checkbox"
+                                checked=${selectedUrls.has(animal.url)}
+                                onChange=${(e) => { e.stopPropagation(); toggleSelection(animal.url); }}
+                            />
+                            <label>${animal.name}</label>
+                        </div>
+                    `)}
+                </div>
+            `}
+        <//>
+    `;
 }
 
 // ============================================================
-// Rescue Management Modal functions
+// Delete Multiple Modal
 // ============================================================
+function DeleteMultipleModal({ isOpen, onClose, animals, onDeleteComplete }) {
+    const [selectedIds, setSelectedIds] = useState(new Set());
+    const [deleting, setDeleting] = useState(false);
+    const showToast = useToast();
 
-let currentEditRescue = null;
-let pendingRescueLogoData = null;
+    useEffect(() => {
+        if (!isOpen) setSelectedIds(new Set());
+    }, [isOpen]);
 
-function openManageRescuesModal() {
-    document.getElementById('manageRescuesModal').classList.add('active');
-    loadRescueList();
-}
+    const toggleSelection = (id) => {
+        setSelectedIds(prev => {
+            const next = new Set(prev);
+            if (next.has(id)) next.delete(id);
+            else next.add(id);
+            return next;
+        });
+    };
 
-function closeManageRescuesModal() {
-    document.getElementById('manageRescuesModal').classList.remove('active');
-}
+    const toggleSelectAll = () => {
+        if (selectedIds.size === animals.length) {
+            setSelectedIds(new Set());
+        } else {
+            setSelectedIds(new Set(animals.map(a => a.id)));
+        }
+    };
 
-function loadRescueList() {
-    const listContainer = document.getElementById('rescueList');
-
-    try {
-        const allRescues = db.getAllRescues();
-
-        if (allRescues.length === 0) {
-            listContainer.innerHTML = '<div class="profile-empty">No rescue organizations found. Click "Add New Rescue" to create one.</div>';
+    const handleDelete = async () => {
+        if (selectedIds.size === 0) {
+            showToast('Please select at least one animal', 'error');
             return;
         }
 
-        let html = '';
-        for (const rescue of allRescues) {
-            // Get logo as data URL
-            let logoHtml = '';
+        const count = selectedIds.size;
+        const names = animals.filter(a => selectedIds.has(a.id)).map(a => a.name).slice(0, 3).join(', ');
+        const displayNames = count > 3 ? `${names} and ${count - 3} more` : names;
+
+        if (!confirm(`Are you sure you want to delete ${count} animal${count > 1 ? 's' : ''}?\n\n${displayNames}\n\nThis cannot be undone.`)) {
+            return;
+        }
+
+        setDeleting(true);
+        try {
+            const { successCount, failCount } = db.deleteAnimals(Array.from(selectedIds));
+            const message = `Deleted ${successCount} animal${successCount !== 1 ? 's' : ''}${failCount > 0 ? `, ${failCount} failed` : ''}`;
+            showToast(message, failCount > 0 ? 'error' : 'success');
+            onClose();
+            onDeleteComplete();
+        } catch (err) {
+            showToast(`Error: ${err.message}`, 'error');
+        } finally {
+            setDeleting(false);
+        }
+    };
+
+    const footer = html`
+        <button class="btn btn-secondary" onClick=${onClose} disabled=${deleting}>Cancel</button>
+        <button class="btn btn-danger" onClick=${handleDelete} disabled=${deleting || selectedIds.size === 0}>
+            ${deleting ? 'Deleting...' : `Delete Selected (${selectedIds.size})`}
+        </button>
+    `;
+
+    return html`
+        <${Modal} isOpen=${isOpen} onClose=${onClose} title="Delete Multiple Animals" footer=${footer}>
+            <div class="select-all-container">
+                <label>
+                    <input
+                        type="checkbox"
+                        checked=${selectedIds.size === animals.length && animals.length > 0}
+                        onChange=${toggleSelectAll}
+                    />
+                    Select All
+                </label>
+            </div>
+            <div class="delete-animal-grid">
+                ${animals.map(animal => html`
+                    <div
+                        key=${animal.id}
+                        class="delete-animal-item ${selectedIds.has(animal.id) ? 'selected' : ''}"
+                        onClick=${() => toggleSelection(animal.id)}
+                    >
+                        <input
+                            type="checkbox"
+                            checked=${selectedIds.has(animal.id)}
+                            onClick=${(e) => e.stopPropagation()}
+                            onChange=${() => toggleSelection(animal.id)}
+                        />
+                        ${animal.imageDataUrl
+                            ? html`<img class="delete-animal-thumbnail" src=${animal.imageDataUrl} alt=${animal.name} />`
+                            : html`<div class="delete-animal-no-image">🐕</div>`
+                        }
+                        <div class="delete-animal-name">${animal.name}</div>
+                    </div>
+                `)}
+            </div>
+        <//>
+    `;
+}
+
+// ============================================================
+// Print Multiple Modal
+// ============================================================
+function PrintMultipleModal({ isOpen, onClose, animals, onPrintSelected }) {
+    const [selectedIds, setSelectedIds] = useState(new Set());
+    const showToast = useToast();
+
+    useEffect(() => {
+        if (!isOpen) setSelectedIds(new Set());
+    }, [isOpen]);
+
+    const toggleSelection = (id) => {
+        setSelectedIds(prev => {
+            const next = new Set(prev);
+            if (next.has(id)) next.delete(id);
+            else next.add(id);
+            return next;
+        });
+    };
+
+    const toggleSelectAll = () => {
+        if (selectedIds.size === animals.length) {
+            setSelectedIds(new Set());
+        } else {
+            setSelectedIds(new Set(animals.map(a => a.id)));
+        }
+    };
+
+    const handlePrint = () => {
+        if (selectedIds.size === 0) {
+            showToast('Please select at least one animal', 'error');
+            return;
+        }
+
+        const count = selectedIds.size;
+        const names = animals.filter(a => selectedIds.has(a.id)).map(a => a.name).slice(0, 3).join(', ');
+        const displayNames = count > 3 ? `${names} and ${count - 3} more` : names;
+
+        if (!confirm(`Generate cards for ${count} animal${count > 1 ? 's' : ''}?\n\n${displayNames}\n\nCards will be added to the print queue.`)) {
+            return;
+        }
+
+        onPrintSelected(Array.from(selectedIds));
+        showToast(`Added ${count} animal${count > 1 ? 's' : ''} to generation queue`, 'success');
+        onClose();
+    };
+
+    const footer = html`
+        <button class="btn btn-secondary" onClick=${onClose}>Cancel</button>
+        <button class="btn btn-primary" onClick=${handlePrint} disabled=${selectedIds.size === 0}>
+            Print Selected (${selectedIds.size})
+        </button>
+    `;
+
+    return html`
+        <${Modal} isOpen=${isOpen} onClose=${onClose} title="Print Multiple Animals" footer=${footer}>
+            <div class="select-all-container">
+                <label>
+                    <input
+                        type="checkbox"
+                        checked=${selectedIds.size === animals.length && animals.length > 0}
+                        onChange=${toggleSelectAll}
+                    />
+                    Select All
+                </label>
+            </div>
+            <div class="delete-animal-grid">
+                ${animals.map(animal => html`
+                    <div
+                        key=${animal.id}
+                        class="delete-animal-item ${selectedIds.has(animal.id) ? 'selected' : ''}"
+                        onClick=${() => toggleSelection(animal.id)}
+                    >
+                        <input
+                            type="checkbox"
+                            checked=${selectedIds.has(animal.id)}
+                            onClick=${(e) => e.stopPropagation()}
+                            onChange=${() => toggleSelection(animal.id)}
+                        />
+                        ${animal.imageDataUrl
+                            ? html`<img class="delete-animal-thumbnail" src=${animal.imageDataUrl} alt=${animal.name} />`
+                            : html`<div class="delete-animal-no-image">🐕</div>`
+                        }
+                        <div class="delete-animal-name">${animal.name}</div>
+                    </div>
+                `)}
+            </div>
+        <//>
+    `;
+}
+
+// ============================================================
+// Print Settings Modal
+// ============================================================
+function PrintSettingsModal({ isOpen, onClose, filePath, onPrintComplete, templateConfig }) {
+    const [printers, setPrinters] = useState([]);
+    const [profiles, setProfiles] = useState([]);
+    const [selectedPrinter, setSelectedPrinter] = useState('');
+    const [selectedProfile, setSelectedProfile] = useState('');
+    const [copies, setCopies] = useState(1);
+    const [paperSize, setPaperSize] = useState('letter');
+    const [orientation, setOrientation] = useState('landscape');
+    const [paperSource, setPaperSource] = useState('default');
+    const [loading, setLoading] = useState(false);
+    const [printing, setPrinting] = useState(false);
+    const [showManageProfiles, setShowManageProfiles] = useState(false);
+    const [showSaveProfile, setShowSaveProfile] = useState(false);
+    const showToast = useToast();
+
+    // Template-driven settings (locked when template provides them)
+    const templatePaperSize = templateConfig?.paperSize || null;
+    const templateOrientation = templateConfig?.orientation || null;
+    const isTemplateLocked = !!(templatePaperSize || templateOrientation);
+
+    // Apply template settings when modal opens
+    useEffect(() => {
+        if (isOpen && templateConfig) {
+            if (templateConfig.paperSize) setPaperSize(templateConfig.paperSize);
+            if (templateConfig.orientation) setOrientation(templateConfig.orientation);
+        }
+    }, [isOpen, templateConfig]);
+
+    // Load printers on open
+    useEffect(() => {
+        if (!isOpen) return;
+        setLoading(true);
+        (async () => {
+            try {
+                const result = await ipcRenderer.invoke('get-printers');
+                if (result.success) {
+                    setPrinters(result.printers);
+                    const defaultPrinter = result.printers.find(p => p.isDefault);
+                    if (defaultPrinter) {
+                        setSelectedPrinter(defaultPrinter.name);
+                    }
+                }
+            } catch (err) {
+                showToast(`Error loading printers: ${err.message}`, 'error');
+            } finally {
+                setLoading(false);
+            }
+        })();
+    }, [isOpen]);
+
+    // Load profiles when printer changes
+    useEffect(() => {
+        if (!selectedPrinter) {
+            setProfiles([]);
+            return;
+        }
+        (async () => {
+            try {
+                const result = await ipcRenderer.invoke('get-print-profiles', selectedPrinter);
+                if (result.success) {
+                    setProfiles(result.profiles);
+                    const defaultProfile = result.profiles.find(p => p.is_default);
+                    if (defaultProfile) {
+                        setSelectedProfile(defaultProfile.id.toString());
+                        applyProfile(defaultProfile);
+                    }
+                }
+            } catch (err) {
+                console.error('Error loading profiles:', err);
+            }
+        })();
+    }, [selectedPrinter]);
+
+    const applyProfile = (profile) => {
+        if (!profile) return;
+        setCopies(profile.copies || 1);
+        setPaperSize(profile.paper_size || 'letter');
+        setOrientation(profile.orientation || 'landscape');
+        setPaperSource(profile.paper_source || 'default');
+    };
+
+    const handleProfileChange = (profileId) => {
+        setSelectedProfile(profileId);
+        const profile = profiles.find(p => p.id.toString() === profileId);
+        if (profile) applyProfile(profile);
+    };
+
+    const handlePrint = async () => {
+        if (!selectedPrinter) {
+            showToast('Please select a printer', 'error');
+            return;
+        }
+
+        setPrinting(true);
+        try {
+            const profile = profiles.find(p => p.id.toString() === selectedProfile);
+            const printOptions = {
+                showDialog: false,
+                printer: selectedPrinter,
+                copies,
+                paperSize,
+                orientation,
+                paperSource,
+                calibration_ab: profile?.calibration_ab || null,
+                calibration_bc: profile?.calibration_bc || null,
+                calibration_cd: profile?.calibration_cd || null,
+                calibration_da: profile?.calibration_da || null,
+                border_top: profile?.border_top || null,
+                border_right: profile?.border_right || null,
+                border_bottom: profile?.border_bottom || null,
+                border_left: profile?.border_left || null,
+                // Pass template page dimensions for correct sizing
+                pageWidthInches: templateConfig?.pageWidthInches,
+                pageHeightInches: templateConfig?.pageHeightInches
+            };
+
+            const result = await ipcRenderer.invoke('print-image', filePath, printOptions);
+            if (result.success) {
+                showToast('Sent to printer!', 'success');
+                onClose();
+                if (onPrintComplete) onPrintComplete(true);
+            } else {
+                showToast(`Print error: ${result.error}`, 'error');
+            }
+        } catch (err) {
+            showToast(`Print error: ${err.message}`, 'error');
+        } finally {
+            setPrinting(false);
+        }
+    };
+
+    const footer = html`
+        <button class="btn btn-secondary" onClick=${onClose}>Cancel</button>
+        <button class="btn btn-primary" onClick=${handlePrint} disabled=${printing || !selectedPrinter}>
+            ${printing ? 'Printing...' : 'Print'}
+        </button>
+    `;
+
+    return html`
+        <${Modal} isOpen=${isOpen} onClose=${onClose} title="Print Settings" footer=${footer} width="850px">
+            <div class="modal-two-column">
+                <div class="modal-column-left">
+                    <div class="printer-row">
+                        <${FormGroup} label="Printer" id="printer">
+                            <select
+                                id="printer"
+                                value=${selectedPrinter}
+                                onChange=${(e) => setSelectedPrinter(e.target.value)}
+                            >
+                                ${loading
+                                    ? html`<option value="">Loading printers...</option>`
+                                    : printers.length === 0
+                                        ? html`<option value="">No printers found</option>`
+                                        : printers.map(p => html`
+                                            <option key=${p.name} value=${p.name}>
+                                                ${p.name}${p.isDefault ? ' (Default)' : ''}
+                                            </option>
+                                        `)
+                                }
+                            </select>
+                        <//>
+                        <button
+                            type="button"
+                            class="btn btn-icon"
+                            onClick=${() => setLoading(true)}
+                            title="Refresh printers"
+                        >
+                            🔄
+                        </button>
+                    </div>
+
+                    <div class="profile-row">
+                        <${FormGroup} label="Profile" id="profile">
+                            <select
+                                id="profile"
+                                value=${selectedProfile}
+                                onChange=${(e) => handleProfileChange(e.target.value)}
+                            >
+                                <option value="">No profile selected</option>
+                                ${profiles.map(p => {
+                                    const isCalibrated = p.calibration_ab && p.calibration_bc && p.calibration_cd && p.calibration_da;
+                                    return html`
+                                        <option key=${p.id} value=${p.id}>
+                                            ${p.name}${p.is_default ? ' (Default)' : ''}${isCalibrated ? ' [Cal]' : ''}
+                                        </option>
+                                    `;
+                                })}
+                            </select>
+                        <//>
+                        <div class="profile-buttons">
+                            <button
+                                type="button"
+                                class="btn btn-secondary"
+                                onClick=${() => setShowSaveProfile(true)}
+                            >
+                                Save
+                            </button>
+                            <button
+                                type="button"
+                                class="btn btn-secondary"
+                                onClick=${() => setShowManageProfiles(true)}
+                            >
+                                Manage
+                            </button>
+                        </div>
+                    </div>
+
+                    ${isTemplateLocked && html`
+                        <div class="template-info-section">
+                            <div class="template-info-header">
+                                <span class="template-info-icon">📄</span>
+                                <span class="template-info-title">Template Settings</span>
+                            </div>
+                            <div class="template-info-details">
+                                ${templatePaperSize && html`<span class="template-info-item">Paper: ${getPaperSizeLabel(templatePaperSize)}</span>`}
+                                ${templateOrientation && html`<span class="template-info-item">Orientation: ${capitalizeFirst(templateOrientation)}</span>`}
+                            </div>
+                        </div>
+                    `}
+
+                    <${FormRow}>
+                        <${FormGroup} label="Copies" id="copies">
+                            <input
+                                type="number"
+                                id="copies"
+                                min="1"
+                                max="99"
+                                value=${copies}
+                                onInput=${(e) => setCopies(parseInt(e.target.value) || 1)}
+                            />
+                        <//>
+                        <${FormGroup} label="Paper Size" id="paperSize">
+                            <select
+                                id="paperSize"
+                                value=${paperSize}
+                                onChange=${(e) => setPaperSize(e.target.value)}
+                                disabled=${!!templatePaperSize}
+                                class=${templatePaperSize ? 'locked-by-template' : ''}
+                            >
+                                <option value="letter">Letter (8.5 x 11 in)</option>
+                                <option value="legal">Legal (8.5 x 14 in)</option>
+                                <option value="A4">A4 (210 x 297 mm)</option>
+                                <option value="A5">A5 (148 x 210 mm)</option>
+                            </select>
+                        <//>
+                    <//>
+
+                    <${FormGroup} label="Orientation" id="orientation">
+                        <div class="orientation-options ${templateOrientation ? 'locked-by-template' : ''}">
+                            <label class="orientation-option">
+                                <input
+                                    type="radio"
+                                    name="orientation"
+                                    value="landscape"
+                                    checked=${orientation === 'landscape'}
+                                    onChange=${() => setOrientation('landscape')}
+                                    disabled=${!!templateOrientation}
+                                />
+                                <span class="orientation-icon orientation-landscape"></span>
+                                <span>Landscape</span>
+                            </label>
+                            <label class="orientation-option">
+                                <input
+                                    type="radio"
+                                    name="orientation"
+                                    value="portrait"
+                                    checked=${orientation === 'portrait'}
+                                    onChange=${() => setOrientation('portrait')}
+                                    disabled=${!!templateOrientation}
+                                />
+                                <span class="orientation-icon orientation-portrait"></span>
+                                <span>Portrait</span>
+                            </label>
+                        </div>
+                    <//>
+
+                    <${FormGroup} label="Paper Source" id="paperSource">
+                        <select
+                            id="paperSource"
+                            value=${paperSource}
+                            onChange=${(e) => setPaperSource(e.target.value)}
+                        >
+                            <option value="default">Default</option>
+                            <option value="rear">Rear Tray</option>
+                        </select>
+                    <//>
+                </div>
+
+                <div class="modal-column-right print-modal-right-column">
+                    <div class="print-preview-container">
+                        <img
+                            class="print-preview-image"
+                            src=${filePath ? `file:///${filePath.replace(/\\/g, '/')}` : ''}
+                            alt="Print preview"
+                        />
+                    </div>
+                </div>
+            </div>
+
+            <${ManageProfilesModal}
+                isOpen=${showManageProfiles}
+                onClose=${() => setShowManageProfiles(false)}
+                printers=${printers}
+                selectedPrinter=${selectedPrinter}
+            />
+
+            <${SaveProfileModal}
+                isOpen=${showSaveProfile}
+                onClose=${() => setShowSaveProfile(false)}
+                printerName=${selectedPrinter}
+                currentSettings=${{ copies, paperSize, orientation, paperSource }}
+                onSave=${() => {
+                    // Reload profiles
+                    if (selectedPrinter) {
+                        ipcRenderer.invoke('get-print-profiles', selectedPrinter).then(result => {
+                            if (result.success) setProfiles(result.profiles);
+                        });
+                    }
+                }}
+            />
+        <//>
+    `;
+}
+
+// ============================================================
+// Manage Profiles Modal
+// ============================================================
+function ManageProfilesModal({ isOpen, onClose, printers, selectedPrinter: initialPrinter }) {
+    const [selectedPrinter, setSelectedPrinter] = useState(initialPrinter || '');
+    const [profiles, setProfiles] = useState([]);
+    const [loading, setLoading] = useState(false);
+    const [editingProfile, setEditingProfile] = useState(null);
+    const showToast = useToast();
+
+    useEffect(() => {
+        if (isOpen && initialPrinter) {
+            setSelectedPrinter(initialPrinter);
+        }
+    }, [isOpen, initialPrinter]);
+
+    useEffect(() => {
+        if (!selectedPrinter) {
+            setProfiles([]);
+            return;
+        }
+        loadProfiles();
+    }, [selectedPrinter]);
+
+    const loadProfiles = async () => {
+        if (!selectedPrinter) return;
+        setLoading(true);
+        try {
+            const result = await ipcRenderer.invoke('get-print-profiles', selectedPrinter);
+            if (result.success) setProfiles(result.profiles);
+        } catch (err) {
+            console.error('Error loading profiles:', err);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const handleSetDefault = async (profileId) => {
+        try {
+            const result = await ipcRenderer.invoke('set-default-print-profile', profileId);
+            if (result.success) {
+                showToast('Default profile updated!', 'success');
+                loadProfiles();
+            } else {
+                showToast(`Error: ${result.error}`, 'error');
+            }
+        } catch (err) {
+            showToast(`Error: ${err.message}`, 'error');
+        }
+    };
+
+    const handleDelete = async (profileId) => {
+        if (!confirm('Are you sure you want to delete this profile?')) return;
+        try {
+            const result = await ipcRenderer.invoke('delete-print-profile', profileId);
+            if (result.success) {
+                showToast('Profile deleted!', 'success');
+                loadProfiles();
+            } else {
+                showToast(`Error: ${result.error}`, 'error');
+            }
+        } catch (err) {
+            showToast(`Error: ${err.message}`, 'error');
+        }
+    };
+
+    const handleCopy = async (profileId) => {
+        const profile = profiles.find(p => p.id === profileId);
+        if (!profile) return;
+
+        try {
+            const result = await ipcRenderer.invoke('save-print-profile', {
+                ...profile,
+                id: null,
+                name: `${profile.name} (Copy)`,
+                is_default: false
+            });
+            if (result.success) {
+                showToast('Profile copied!', 'success');
+                loadProfiles();
+            } else {
+                showToast(`Error: ${result.error}`, 'error');
+            }
+        } catch (err) {
+            showToast(`Error: ${err.message}`, 'error');
+        }
+    };
+
+    const footer = html`
+        <button class="btn btn-secondary" onClick=${onClose}>Close</button>
+    `;
+
+    return html`
+        <${Modal} isOpen=${isOpen} onClose=${onClose} title="Manage Print Profiles" footer=${footer} width="550px">
+            <${FormGroup} label="Printer" id="managePrinter">
+                <select
+                    id="managePrinter"
+                    value=${selectedPrinter}
+                    onChange=${(e) => setSelectedPrinter(e.target.value)}
+                >
+                    <option value="">Select a printer...</option>
+                    ${printers.map(p => html`
+                        <option key=${p.name} value=${p.name}>
+                            ${p.name}${p.isDefault ? ' (Default)' : ''}
+                        </option>
+                    `)}
+                </select>
+            <//>
+
+            <div class="profile-list">
+                ${!selectedPrinter ? html`
+                    <div class="profile-empty">Select a printer to view profiles</div>
+                ` : loading ? html`
+                    <div class="profile-empty">Loading...</div>
+                ` : profiles.length === 0 ? html`
+                    <div class="profile-empty">No profiles for this printer</div>
+                ` : profiles.map(profile => {
+                    const isCalibrated = profile.calibration_ab && profile.calibration_bc &&
+                                        profile.calibration_cd && profile.calibration_da;
+                    return html`
+                        <div key=${profile.id} class="profile-item">
+                            <div class="profile-item-info">
+                                <div class="profile-item-name">
+                                    ${profile.name}
+                                    ${profile.is_default && html`<span class="default-badge">Default</span>`}
+                                    ${isCalibrated && html`<span class="default-badge" style="background: #28a745;">Calibrated</span>`}
+                                </div>
+                                <div class="profile-item-settings">
+                                    ${getPaperSizeLabel(profile.paper_size)}, ${capitalizeFirst(profile.orientation)}, ${profile.copies} ${profile.copies === 1 ? 'copy' : 'copies'}
+                                </div>
+                            </div>
+                            <div class="profile-item-actions">
+                                ${!profile.is_default && html`
+                                    <button class="btn btn-secondary" onClick=${() => handleSetDefault(profile.id)}>Set Default</button>
+                                `}
+                                <button class="btn btn-secondary" onClick=${() => handleCopy(profile.id)}>Copy</button>
+                                <button class="btn btn-secondary" onClick=${() => setEditingProfile(profile)}>Edit</button>
+                                <button class="btn btn-danger-outline" onClick=${() => handleDelete(profile.id)}>Delete</button>
+                            </div>
+                        </div>
+                    `;
+                })}
+            </div>
+
+            ${selectedPrinter && html`
+                <button
+                    type="button"
+                    class="btn btn-primary"
+                    onClick=${() => setEditingProfile({ printer_name: selectedPrinter })}
+                    style="margin-top: 15px;"
+                >
+                    + New Profile
+                </button>
+            `}
+
+            <${SaveProfileModal}
+                isOpen=${!!editingProfile}
+                onClose=${() => setEditingProfile(null)}
+                printerName=${selectedPrinter}
+                profile=${editingProfile}
+                onSave=${loadProfiles}
+            />
+        <//>
+    `;
+}
+
+// ============================================================
+// Save Profile Modal
+// ============================================================
+function SaveProfileModal({ isOpen, onClose, printerName, profile, currentSettings, onSave }) {
+    const [name, setName] = useState('');
+    const [copies, setCopies] = useState(1);
+    const [paperSize, setPaperSize] = useState('letter');
+    const [orientation, setOrientation] = useState('landscape');
+    const [paperSource, setPaperSource] = useState('default');
+    const [isDefault, setIsDefault] = useState(false);
+    const [calibrationAB, setCalibrationAB] = useState('100');
+    const [calibrationBC, setCalibrationBC] = useState('100');
+    const [calibrationCD, setCalibrationCD] = useState('100');
+    const [calibrationDA, setCalibrationDA] = useState('100');
+    const [borderTop, setBorderTop] = useState('');
+    const [borderRight, setBorderRight] = useState('');
+    const [borderBottom, setBorderBottom] = useState('');
+    const [borderLeft, setBorderLeft] = useState('');
+    const [saving, setSaving] = useState(false);
+    const showToast = useToast();
+
+    useEffect(() => {
+        if (!isOpen) return;
+        if (profile?.id) {
+            // Editing existing profile
+            setName(profile.name || '');
+            setCopies(profile.copies || 1);
+            setPaperSize(profile.paper_size || 'letter');
+            setOrientation(profile.orientation || 'landscape');
+            setPaperSource(profile.paper_source || 'default');
+            setIsDefault(profile.is_default || false);
+            setCalibrationAB(profile.calibration_ab?.toString() || '100');
+            setCalibrationBC(profile.calibration_bc?.toString() || '100');
+            setCalibrationCD(profile.calibration_cd?.toString() || '100');
+            setCalibrationDA(profile.calibration_da?.toString() || '100');
+            setBorderTop(profile.border_top?.toString() || '');
+            setBorderRight(profile.border_right?.toString() || '');
+            setBorderBottom(profile.border_bottom?.toString() || '');
+            setBorderLeft(profile.border_left?.toString() || '');
+        } else if (currentSettings) {
+            // New profile from current settings
+            setName('');
+            setCopies(currentSettings.copies || 1);
+            setPaperSize(currentSettings.paperSize || 'letter');
+            setOrientation(currentSettings.orientation || 'landscape');
+            setPaperSource(currentSettings.paperSource || 'default');
+            setIsDefault(false);
+            setCalibrationAB('100');
+            setCalibrationBC('100');
+            setCalibrationCD('100');
+            setCalibrationDA('100');
+            setBorderTop('');
+            setBorderRight('');
+            setBorderBottom('');
+            setBorderLeft('');
+        } else {
+            // New profile with defaults
+            setName('');
+            setCopies(1);
+            setPaperSize('letter');
+            setOrientation('landscape');
+            setPaperSource('default');
+            setIsDefault(false);
+            setCalibrationAB('100');
+            setCalibrationBC('100');
+            setCalibrationCD('100');
+            setCalibrationDA('100');
+            setBorderTop('');
+            setBorderRight('');
+            setBorderBottom('');
+            setBorderLeft('');
+        }
+    }, [isOpen, profile, currentSettings]);
+
+    const handleSave = async () => {
+        if (!name.trim()) {
+            showToast('Please enter a profile name', 'error');
+            return;
+        }
+
+        setSaving(true);
+        try {
+            const profileData = {
+                id: profile?.id || null,
+                name: name.trim(),
+                printer_name: printerName,
+                copies,
+                paper_size: paperSize,
+                orientation,
+                paper_source: paperSource,
+                is_default: isDefault,
+                calibration_ab: parseFloat(calibrationAB) || null,
+                calibration_bc: parseFloat(calibrationBC) || null,
+                calibration_cd: parseFloat(calibrationCD) || null,
+                calibration_da: parseFloat(calibrationDA) || null,
+                border_top: borderTop ? parseFloat(borderTop) : null,
+                border_right: borderRight ? parseFloat(borderRight) : null,
+                border_bottom: borderBottom ? parseFloat(borderBottom) : null,
+                border_left: borderLeft ? parseFloat(borderLeft) : null
+            };
+
+            const result = await ipcRenderer.invoke('save-print-profile', profileData);
+            if (result.success) {
+                showToast(profile?.id ? 'Profile updated!' : 'Profile saved!', 'success');
+                onClose();
+                if (onSave) onSave();
+            } else {
+                showToast(`Error: ${result.error}`, 'error');
+            }
+        } catch (err) {
+            showToast(`Error: ${err.message}`, 'error');
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    const handlePrintCalibration = async () => {
+        try {
+            showToast('Printing calibration test page...', 'success');
+            const result = await ipcRenderer.invoke('print-calibration-page', {
+                printer: printerName,
+                showDialog: false,
+                paperSize,
+                paperSource
+            });
+            if (result.success) {
+                showToast('Calibration page sent to printer', 'success');
+            } else {
+                showToast(`Error: ${result.error}`, 'error');
+            }
+        } catch (err) {
+            showToast(`Error: ${err.message}`, 'error');
+        }
+    };
+
+    const clearCalibration = () => {
+        setCalibrationAB('100');
+        setCalibrationBC('100');
+        setCalibrationCD('100');
+        setCalibrationDA('100');
+        setBorderTop('');
+        setBorderRight('');
+        setBorderBottom('');
+        setBorderLeft('');
+    };
+
+    const isCalibrated = calibrationAB && calibrationBC && calibrationCD && calibrationDA &&
+                         parseFloat(calibrationAB) > 0 && parseFloat(calibrationBC) > 0 &&
+                         parseFloat(calibrationCD) > 0 && parseFloat(calibrationDA) > 0;
+
+    const footer = html`
+        <button class="btn btn-secondary" onClick=${onClose}>Cancel</button>
+        <button class="btn btn-primary" onClick=${handleSave} disabled=${saving}>
+            ${saving ? 'Saving...' : 'Save Profile'}
+        </button>
+    `;
+
+    return html`
+        <${Modal}
+            isOpen=${isOpen}
+            onClose=${onClose}
+            title=${profile?.id ? 'Edit Print Profile' : 'Save Print Profile'}
+            footer=${footer}
+            width="800px"
+        >
+            <div class="modal-two-column">
+                <div class="modal-column-left">
+                    <${FormGroup} label="Profile Name" id="profileName">
+                        <input
+                            type="text"
+                            id="profileName"
+                            placeholder="e.g., Photo Paper - High Quality"
+                            value=${name}
+                            onInput=${(e) => setName(e.target.value)}
+                        />
+                    <//>
+
+                    <${FormRow}>
+                        <${FormGroup} label="Copies" id="profileCopies">
+                            <input
+                                type="number"
+                                id="profileCopies"
+                                min="1"
+                                max="99"
+                                value=${copies}
+                                onInput=${(e) => setCopies(parseInt(e.target.value) || 1)}
+                            />
+                        <//>
+                        <${FormGroup} label="Paper Size" id="profilePaperSize">
+                            <select
+                                id="profilePaperSize"
+                                value=${paperSize}
+                                onChange=${(e) => setPaperSize(e.target.value)}
+                            >
+                                <option value="letter">Letter (8.5 x 11 in)</option>
+                                <option value="legal">Legal (8.5 x 14 in)</option>
+                                <option value="A4">A4 (210 x 297 mm)</option>
+                                <option value="A5">A5 (148 x 210 mm)</option>
+                            </select>
+                        <//>
+                    <//>
+
+                    <${FormRow}>
+                        <${FormGroup} label="Orientation">
+                            <div class="orientation-options">
+                                <label class="orientation-option">
+                                    <input
+                                        type="radio"
+                                        name="profileOrientation"
+                                        value="landscape"
+                                        checked=${orientation === 'landscape'}
+                                        onChange=${() => setOrientation('landscape')}
+                                    />
+                                    <span>Landscape</span>
+                                </label>
+                                <label class="orientation-option">
+                                    <input
+                                        type="radio"
+                                        name="profileOrientation"
+                                        value="portrait"
+                                        checked=${orientation === 'portrait'}
+                                        onChange=${() => setOrientation('portrait')}
+                                    />
+                                    <span>Portrait</span>
+                                </label>
+                            </div>
+                        <//>
+                        <${FormGroup} label="Paper Source" id="profilePaperSource">
+                            <select
+                                id="profilePaperSource"
+                                value=${paperSource}
+                                onChange=${(e) => setPaperSource(e.target.value)}
+                            >
+                                <option value="default">Default</option>
+                                <option value="rear">Rear Tray</option>
+                            </select>
+                        <//>
+                    <//>
+
+                    <label class="checkbox-option" style="margin-top: 10px;">
+                        <input
+                            type="checkbox"
+                            checked=${isDefault}
+                            onChange=${(e) => setIsDefault(e.target.checked)}
+                        />
+                        <span>Set as default for this printer</span>
+                    </label>
+                </div>
+
+                <div class="modal-column-right">
+                    <div class="calibration-section" style="margin-top: 0; border: none; padding: 0;">
+                        <div class="calibration-header">
+                            <h4>Print Calibration</h4>
+                            <span class=${`calibration-status ${isCalibrated ? 'calibrated' : 'not-calibrated'}`}>
+                                ${isCalibrated ? 'Calibrated' : 'Not Calibrated'}
+                            </span>
+                        </div>
+
+                        <div class="calibration-diagram">
+                            <svg viewBox="0 0 120 120" xmlns="http://www.w3.org/2000/svg">
+                                <rect x="20" y="20" width="80" height="80" fill="none" stroke="#ccc" stroke-width="1"/>
+                                <circle cx="20" cy="20" r="5" fill="#333"/>
+                                <circle cx="100" cy="20" r="5" fill="#333"/>
+                                <circle cx="100" cy="100" r="5" fill="#333"/>
+                                <circle cx="20" cy="100" r="5" fill="#333"/>
+                                <text x="15" y="12" font-size="10" fill="#333">A</text>
+                                <text x="98" y="12" font-size="10" fill="#333">B</text>
+                                <text x="105" y="105" font-size="10" fill="#333">C</text>
+                                <text x="8" y="105" font-size="10" fill="#333">D</text>
+                            </svg>
+                        </div>
+
+                        <button
+                            type="button"
+                            class="btn btn-secondary"
+                            onClick=${handlePrintCalibration}
+                            style="width: 100%; margin-bottom: 10px;"
+                        >
+                            Print Calibration Test Page
+                        </button>
+
+                        <p class="calibration-help">
+                            Print the test page, measure the distances between dots (in mm), and enter them below.
+                            Expected distance: 100mm
+                        </p>
+
+                        <div class="calibration-inputs">
+                            <div class="calibration-input-group">
+                                <label>A-B:</label>
+                                <input
+                                    type="number"
+                                    step="0.1"
+                                    min="0"
+                                    placeholder="100"
+                                    value=${calibrationAB}
+                                    onInput=${(e) => setCalibrationAB(e.target.value)}
+                                />
+                                <span>mm</span>
+                            </div>
+                            <div class="calibration-input-group">
+                                <label>B-C:</label>
+                                <input
+                                    type="number"
+                                    step="0.1"
+                                    min="0"
+                                    placeholder="100"
+                                    value=${calibrationBC}
+                                    onInput=${(e) => setCalibrationBC(e.target.value)}
+                                />
+                                <span>mm</span>
+                            </div>
+                            <div class="calibration-input-group">
+                                <label>C-D:</label>
+                                <input
+                                    type="number"
+                                    step="0.1"
+                                    min="0"
+                                    placeholder="100"
+                                    value=${calibrationCD}
+                                    onInput=${(e) => setCalibrationCD(e.target.value)}
+                                />
+                                <span>mm</span>
+                            </div>
+                            <div class="calibration-input-group">
+                                <label>D-A:</label>
+                                <input
+                                    type="number"
+                                    step="0.1"
+                                    min="0"
+                                    placeholder="100"
+                                    value=${calibrationDA}
+                                    onInput=${(e) => setCalibrationDA(e.target.value)}
+                                />
+                                <span>mm</span>
+                            </div>
+                        </div>
+
+                        <h5 style="margin-top: 15px; margin-bottom: 8px; font-size: 0.9rem; color: #333;">Border Calibration</h5>
+                        <p class="calibration-help" style="margin-top: 0; margin-bottom: 10px;">
+                            Measure the white space from paper edge to the black border on each side (in mm).
+                        </p>
+
+                        <div class="calibration-inputs">
+                            <div class="calibration-input-group">
+                                <label>Top:</label>
+                                <input
+                                    type="number"
+                                    step="0.1"
+                                    min="0"
+                                    placeholder="0"
+                                    value=${borderTop}
+                                    onInput=${(e) => setBorderTop(e.target.value)}
+                                />
+                                <span>mm</span>
+                            </div>
+                            <div class="calibration-input-group">
+                                <label>Right:</label>
+                                <input
+                                    type="number"
+                                    step="0.1"
+                                    min="0"
+                                    placeholder="0"
+                                    value=${borderRight}
+                                    onInput=${(e) => setBorderRight(e.target.value)}
+                                />
+                                <span>mm</span>
+                            </div>
+                            <div class="calibration-input-group">
+                                <label>Bottom:</label>
+                                <input
+                                    type="number"
+                                    step="0.1"
+                                    min="0"
+                                    placeholder="0"
+                                    value=${borderBottom}
+                                    onInput=${(e) => setBorderBottom(e.target.value)}
+                                />
+                                <span>mm</span>
+                            </div>
+                            <div class="calibration-input-group">
+                                <label>Left:</label>
+                                <input
+                                    type="number"
+                                    step="0.1"
+                                    min="0"
+                                    placeholder="0"
+                                    value=${borderLeft}
+                                    onInput=${(e) => setBorderLeft(e.target.value)}
+                                />
+                                <span>mm</span>
+                            </div>
+                        </div>
+
+                        <button
+                            type="button"
+                            class="btn btn-secondary"
+                            onClick=${clearCalibration}
+                            style="width: 100%; margin-top: 10px;"
+                        >
+                            Clear Calibration
+                        </button>
+                    </div>
+                </div>
+            </div>
+        <//>
+    `;
+}
+
+// ============================================================
+// Manage Rescues Modal
+// ============================================================
+function ManageRescuesModal({ isOpen, onClose, onUpdate }) {
+    const [rescues, setRescues] = useState([]);
+    const [editingRescue, setEditingRescue] = useState(null);
+
+    useEffect(() => {
+        if (isOpen) loadRescues();
+    }, [isOpen]);
+
+    const loadRescues = () => {
+        setRescues(db.getAllRescues());
+    };
+
+    const footer = html`
+        <button class="btn btn-secondary" onClick=${onClose}>Close</button>
+    `;
+
+    return html`
+        <${Modal} isOpen=${isOpen} onClose=${onClose} title="Manage Rescue Organizations" footer=${footer} width="600px">
+            <div class="profile-list">
+                ${rescues.length === 0 ? html`
+                    <div class="profile-empty">No rescue organizations found. Click "Add New Rescue" to create one.</div>
+                ` : rescues.map(rescue => {
+                    let logoHtml = null;
+                    if (rescue.logo_data) {
+                        const mimeType = rescue.logo_mime || 'image/png';
+                        const base64 = Buffer.from(rescue.logo_data).toString('base64');
+                        logoHtml = html`<img src="data:${mimeType};base64,${base64}" style="width: 40px; height: 40px; object-fit: contain; margin-right: 12px; border-radius: 4px; background: #f5f5f5;" />`;
+                    } else {
+                        logoHtml = html`<div style="width: 40px; height: 40px; background: #f0f0f0; border-radius: 4px; margin-right: 12px; display: flex; align-items: center; justify-content: center; color: #999; font-size: 0.8rem;">Logo</div>`;
+                    }
+
+                    return html`
+                        <div key=${rescue.id} class="profile-item" style="display: flex; align-items: center;">
+                            ${logoHtml}
+                            <div class="profile-item-info" style="flex: 1;">
+                                <div class="profile-item-name">${rescue.name}</div>
+                                <div class="profile-item-settings">
+                                    ${rescue.website || 'No website'}
+                                    ${rescue.scraper_type ? ` | Scraper: ${rescue.scraper_type}` : ''}
+                                </div>
+                            </div>
+                            <div class="profile-item-actions">
+                                <button class="btn btn-secondary" onClick=${() => setEditingRescue(rescue)}>Edit</button>
+                            </div>
+                        </div>
+                    `;
+                })}
+            </div>
+
+            <button
+                type="button"
+                class="btn btn-primary"
+                onClick=${() => setEditingRescue({})}
+                style="width: 100%; margin-top: 15px;"
+            >
+                + Add New Rescue
+            </button>
+
+            <${EditRescueModal}
+                isOpen=${!!editingRescue}
+                onClose=${() => setEditingRescue(null)}
+                rescue=${editingRescue}
+                onSave=${() => { loadRescues(); if (onUpdate) onUpdate(); }}
+            />
+        <//>
+    `;
+}
+
+// ============================================================
+// Edit Rescue Modal
+// ============================================================
+function EditRescueModal({ isOpen, onClose, rescue, onSave }) {
+    const [name, setName] = useState('');
+    const [website, setWebsite] = useState('');
+    const [orgId, setOrgId] = useState('');
+    const [scraperType, setScraperType] = useState('');
+    const [logoData, setLogoData] = useState(null);
+    const [logoPreview, setLogoPreview] = useState(null);
+    const [saving, setSaving] = useState(false);
+    const showToast = useToast();
+
+    useEffect(() => {
+        if (!isOpen) return;
+        if (rescue?.id) {
+            setName(rescue.name || '');
+            setWebsite(rescue.website || '');
+            setOrgId(rescue.org_id || '');
+            setScraperType(rescue.scraper_type || '');
+            setLogoData(null);
             if (rescue.logo_data) {
                 const mimeType = rescue.logo_mime || 'image/png';
                 const base64 = Buffer.from(rescue.logo_data).toString('base64');
-                logoHtml = `<img src="data:${mimeType};base64,${base64}" style="width: 40px; height: 40px; object-fit: contain; margin-right: 12px; border-radius: 4px; background: #f5f5f5;">`;
+                setLogoPreview(`data:${mimeType};base64,${base64}`);
             } else {
-                logoHtml = `<div style="width: 40px; height: 40px; background: #f0f0f0; border-radius: 4px; margin-right: 12px; display: flex; align-items: center; justify-content: center; color: #999; font-size: 0.8rem;">Logo</div>`;
+                setLogoPreview(null);
             }
-
-            html += `
-                <div class="profile-item" style="display: flex; align-items: center;">
-                    ${logoHtml}
-                    <div class="profile-item-info" style="flex: 1;">
-                        <div class="profile-item-name">${escapeHtml(rescue.name)}</div>
-                        <div class="profile-item-settings">
-                            ${rescue.website ? escapeHtml(rescue.website) : 'No website'}
-                            ${rescue.scraper_type ? ` | Scraper: ${rescue.scraper_type}` : ''}
-                        </div>
-                    </div>
-                    <div class="profile-item-actions">
-                        <button class="btn btn-secondary" onclick="openEditRescueModal(${rescue.id})">Edit</button>
-                    </div>
-                </div>
-            `;
+        } else {
+            setName('');
+            setWebsite('');
+            setOrgId('');
+            setScraperType('');
+            setLogoData(null);
+            setLogoPreview(null);
         }
+    }, [isOpen, rescue]);
 
-        listContainer.innerHTML = html;
-    } catch (err) {
-        console.error('[App] Error loading rescues:', err);
-        listContainer.innerHTML = `<div class="profile-empty" style="color: #dc3545;">Error loading rescues: ${err.message}</div>`;
-    }
-}
-
-function openAddRescueModal() {
-    currentEditRescue = null;
-    pendingRescueLogoData = null;
-
-    document.getElementById('editRescueTitle').textContent = 'Add Rescue Organization';
-    document.getElementById('editRescueId').value = '';
-    document.getElementById('rescueNameInput').value = '';
-    document.getElementById('rescueWebsiteInput').value = '';
-    document.getElementById('rescueOrgIdInput').value = '';
-    document.getElementById('rescueScraperTypeSelect').value = '';
-
-    // Reset logo preview
-    document.getElementById('rescueLogoPreview').style.display = 'none';
-    document.getElementById('rescueLogoNoImage').style.display = 'flex';
-
-    // Hide delete button for new rescues
-    document.getElementById('deleteRescueBtn').style.display = 'none';
-
-    document.getElementById('editRescueModal').classList.add('active');
-}
-
-function openEditRescueModal(rescueId) {
-    const rescue = db.getRescueById(rescueId);
-    if (!rescue) {
-        showToast('Rescue not found', 'error');
-        return;
-    }
-
-    currentEditRescue = rescue;
-    pendingRescueLogoData = null;
-
-    document.getElementById('editRescueTitle').textContent = 'Edit Rescue Organization';
-    document.getElementById('editRescueId').value = rescue.id;
-    document.getElementById('rescueNameInput').value = rescue.name || '';
-    document.getElementById('rescueWebsiteInput').value = rescue.website || '';
-    document.getElementById('rescueOrgIdInput').value = rescue.org_id || '';
-    document.getElementById('rescueScraperTypeSelect').value = rescue.scraper_type || '';
-
-    // Set logo preview
-    const logoPreview = document.getElementById('rescueLogoPreview');
-    const logoNoImage = document.getElementById('rescueLogoNoImage');
-
-    if (rescue.logo_data) {
-        const mimeType = rescue.logo_mime || 'image/png';
-        const base64 = Buffer.from(rescue.logo_data).toString('base64');
-        logoPreview.src = `data:${mimeType};base64,${base64}`;
-        logoPreview.style.display = 'block';
-        logoNoImage.style.display = 'none';
-    } else {
-        logoPreview.style.display = 'none';
-        logoNoImage.style.display = 'flex';
-    }
-
-    // Show delete button for existing rescues
-    document.getElementById('deleteRescueBtn').style.display = 'block';
-
-    document.getElementById('editRescueModal').classList.add('active');
-}
-
-function closeEditRescueModal() {
-    document.getElementById('editRescueModal').classList.remove('active');
-    currentEditRescue = null;
-    pendingRescueLogoData = null;
-}
-
-async function handleRescueLogoSelected(event) {
-    const file = event.target.files[0];
-    if (!file) return;
-
-    try {
-        const arrayBuffer = await file.arrayBuffer();
-        const uint8Array = new Uint8Array(arrayBuffer);
-
-        // Convert to hex string for database
-        let hexString = '';
-        for (let i = 0; i < uint8Array.length; i++) {
-            hexString += uint8Array[i].toString(16).padStart(2, '0');
-        }
-
-        pendingRescueLogoData = {
-            hex: hexString,
-            mime: file.type || 'image/png',
-            path: file.name
-        };
-
-        // Convert to base64 for preview
-        let binary = '';
-        for (let i = 0; i < uint8Array.length; i++) {
-            binary += String.fromCharCode(uint8Array[i]);
-        }
-        const base64 = btoa(binary);
-        const dataUrl = `data:${file.type};base64,${base64}`;
-
-        // Update preview
-        const logoPreview = document.getElementById('rescueLogoPreview');
-        const logoNoImage = document.getElementById('rescueLogoNoImage');
-        logoPreview.src = dataUrl;
-        logoPreview.style.display = 'block';
-        logoNoImage.style.display = 'none';
-
-        showToast('Logo selected. Click Save to apply.');
-    } catch (err) {
-        console.error('[App] Error loading logo:', err);
-        showToast('Error loading logo: ' + err.message, 'error');
-    }
-}
-
-async function saveRescue() {
-    const name = document.getElementById('rescueNameInput').value.trim();
-    const website = document.getElementById('rescueWebsiteInput').value.trim();
-    const orgId = document.getElementById('rescueOrgIdInput').value.trim();
-    const scraperType = document.getElementById('rescueScraperTypeSelect').value;
-    const rescueId = document.getElementById('editRescueId').value;
-
-    if (!name) {
-        showToast('Please enter a rescue name', 'error');
-        return;
-    }
-
-    const rescueData = {
-        name: name,
-        website: website || null,
-        org_id: orgId || null,
-        scraper_type: scraperType || null
+    const handleLogoChange = async (imageData) => {
+        setLogoData(imageData);
+        setLogoPreview(imageData.dataUrl);
     };
 
+    const handleSave = async () => {
+        if (!name.trim()) {
+            showToast('Please enter a rescue name', 'error');
+            return;
+        }
+
+        setSaving(true);
+        try {
+            const rescueData = {
+                name: name.trim(),
+                website: website || null,
+                org_id: orgId || null,
+                scraper_type: scraperType || null
+            };
+
+            const logoToSave = logoData ? { hex: logoData.hex, mime: logoData.mime, path: logoData.path } : null;
+
+            if (rescue?.id) {
+                db.updateRescue(rescue.id, rescueData, logoToSave);
+                showToast(`${name} updated successfully!`);
+            } else {
+                db.createRescue(rescueData, logoToSave);
+                showToast(`${name} created successfully!`);
+            }
+
+            onClose();
+            if (onSave) onSave();
+        } catch (err) {
+            showToast(`Error: ${err.message}`, 'error');
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    const handleDelete = () => {
+        if (!rescue?.id) return;
+        if (!confirm(`Are you sure you want to delete "${rescue.name}"?\n\nThis cannot be undone.`)) return;
+
+        try {
+            db.deleteRescue(rescue.id);
+            showToast(`${rescue.name} deleted successfully!`);
+            onClose();
+            if (onSave) onSave();
+        } catch (err) {
+            showToast(`Error: ${err.message}`, 'error');
+        }
+    };
+
+    const footer = html`
+        ${rescue?.id && html`
+            <button class="btn btn-danger" onClick=${handleDelete}>Delete</button>
+        `}
+        <button class="btn btn-secondary" onClick=${onClose}>Cancel</button>
+        <button class="btn btn-primary" onClick=${handleSave} disabled=${saving}>
+            ${saving ? 'Saving...' : 'Save Rescue'}
+        </button>
+    `;
+
+    return html`
+        <${Modal}
+            isOpen=${isOpen}
+            onClose=${onClose}
+            title=${rescue?.id ? 'Edit Rescue Organization' : 'Add Rescue Organization'}
+            footer=${footer}
+            width="500px"
+        >
+            <${ImageUpload}
+                imageUrl=${logoPreview}
+                onImageChange=${handleLogoChange}
+                placeholder="Logo"
+            />
+
+            <${FormGroup} label="Name *" id="rescueName">
+                <input
+                    type="text"
+                    id="rescueName"
+                    placeholder="e.g., Happy Tails Rescue"
+                    value=${name}
+                    onInput=${(e) => setName(e.target.value)}
+                    required
+                />
+            <//>
+
+            <${FormGroup} label="Website" id="rescueWebsite">
+                <input
+                    type="text"
+                    id="rescueWebsite"
+                    placeholder="e.g., https://example.com"
+                    value=${website}
+                    onInput=${(e) => setWebsite(e.target.value)}
+                />
+            <//>
+
+            <${FormRow}>
+                <${FormGroup} label="Organization ID" id="rescueOrgId">
+                    <input
+                        type="text"
+                        id="rescueOrgId"
+                        placeholder="For scraper (optional)"
+                        value=${orgId}
+                        onInput=${(e) => setOrgId(e.target.value)}
+                    />
+                <//>
+                <${FormGroup} label="Scraper Type" id="rescueScraperType">
+                    <select
+                        id="rescueScraperType"
+                        value=${scraperType}
+                        onChange=${(e) => setScraperType(e.target.value)}
+                    >
+                        <option value="">None</option>
+                        <option value="wagtopia">Wagtopia</option>
+                        <option value="adoptapet">Adoptapet</option>
+                    </select>
+                <//>
+            <//>
+        <//>
+    `;
+}
+
+// ============================================================
+// Settings Modal (consolidates all "manage" screens)
+// ============================================================
+function SettingsModal({ isOpen, onClose, printers, onUpdate, onEditTemplate }) {
+    const [openaiKey, setOpenaiKey] = useState('');
+    const [openaiKeyVisible, setOpenaiKeyVisible] = useState(false);
+    const [saving, setSaving] = useState(false);
+    const showToast = useToast();
+
+    // Sub-modal states
+    const [showManageProfiles, setShowManageProfiles] = useState(false);
+    const [showManageRescues, setShowManageRescues] = useState(false);
+    const [showManageTemplates, setShowManageTemplates] = useState(false);
+
+    useEffect(() => {
+        if (isOpen) {
+            loadSettings();
+        }
+    }, [isOpen]);
+
+    const loadSettings = () => {
+        try {
+            const key = db.getSetting('openai_api_key');
+            setOpenaiKey(key || '');
+        } catch (err) {
+            console.error('[Settings] Error loading settings:', err);
+        }
+    };
+
+    const handleSaveApiKey = async () => {
+        setSaving(true);
+        try {
+            db.setSetting('openai_api_key', openaiKey);
+            showToast('API key saved successfully!');
+        } catch (err) {
+            showToast(`Error saving API key: ${err.message}`, 'error');
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    const footer = html`
+        <button class="btn btn-secondary" onClick=${onClose}>Close</button>
+    `;
+
+    return html`
+        <${Modal} isOpen=${isOpen} onClose=${onClose} title="Settings" footer=${footer} width="600px">
+            <div class="settings-list">
+                <div class="settings-list-item" onClick=${() => setShowManageRescues(true)}>
+                    <div class="settings-list-item-header">
+                        <span class="settings-list-item-icon">🏠</span>
+                        <span class="settings-list-item-text">
+                            <strong>Rescue Organizations</strong>
+                            <small>Add and edit rescue organizations</small>
+                        </span>
+                        <span class="settings-list-item-arrow">›</span>
+                    </div>
+                </div>
+
+                <div class="settings-list-item" onClick=${() => setShowManageProfiles(true)}>
+                    <div class="settings-list-item-header">
+                        <span class="settings-list-item-icon">🖨️</span>
+                        <span class="settings-list-item-text">
+                            <strong>Print Profiles</strong>
+                            <small>Configure printer settings</small>
+                        </span>
+                        <span class="settings-list-item-arrow">›</span>
+                    </div>
+                </div>
+
+                <div class="settings-list-item" onClick=${() => setShowManageTemplates(true)}>
+                    <div class="settings-list-item-header">
+                        <span class="settings-list-item-icon">📄</span>
+                        <span class="settings-list-item-text">
+                            <strong>Card Templates</strong>
+                            <small>Customize card designs</small>
+                        </span>
+                        <span class="settings-list-item-arrow">›</span>
+                    </div>
+                </div>
+
+                <div class="settings-list-item settings-list-item-expandable">
+                    <div class="settings-list-item-header">
+                        <span class="settings-list-item-icon">🤖</span>
+                        <span class="settings-list-item-text">
+                            <strong>OpenAI API Key</strong>
+                            <small>Enable AI-powered bio generation</small>
+                        </span>
+                    </div>
+                    <div class="settings-list-item-content">
+                        <div class="api-key-input-container">
+                            <input
+                                type=${openaiKeyVisible ? 'text' : 'password'}
+                                class="api-key-input"
+                                placeholder="sk-..."
+                                value=${openaiKey}
+                                onInput=${(e) => setOpenaiKey(e.target.value)}
+                            />
+                            <button
+                                type="button"
+                                class="btn-icon api-key-toggle"
+                                onClick=${() => setOpenaiKeyVisible(!openaiKeyVisible)}
+                                title=${openaiKeyVisible ? 'Hide API key' : 'Show API key'}
+                            >
+                                ${openaiKeyVisible ? '🙈' : '👁️'}
+                            </button>
+                        </div>
+                        <div class="api-key-actions">
+                            <button
+                                class="btn btn-primary btn-sm"
+                                onClick=${handleSaveApiKey}
+                                disabled=${saving}
+                            >
+                                ${saving ? 'Saving...' : 'Save'}
+                            </button>
+                            <a href="#" class="api-key-link" onClick=${(e) => { e.preventDefault(); require('electron').shell.openExternal('https://platform.openai.com/api-keys'); }}>Get an API key</a>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Nested Modals for management screens -->
+            <${ManageProfilesModal}
+                isOpen=${showManageProfiles}
+                onClose=${() => setShowManageProfiles(false)}
+                printers=${printers}
+                selectedPrinter=${printers.find(p => p.isDefault)?.name || ''}
+            />
+
+            <${ManageRescuesModal}
+                isOpen=${showManageRescues}
+                onClose=${() => setShowManageRescues(false)}
+                onUpdate=${onUpdate}
+            />
+
+            <${ManageTemplatesModal}
+                isOpen=${showManageTemplates}
+                onClose=${() => setShowManageTemplates(false)}
+                onEditTemplate=${(template) => { setShowManageTemplates(false); onClose(); onEditTemplate(template); }}
+            />
+        <//>
+    `;
+}
+
+// ============================================================
+// Manage Templates Modal (template list)
+// ============================================================
+function ManageTemplatesModal({ isOpen, onClose, onEditTemplate }) {
+    const [templates, setTemplates] = useState([]);
+
+    useEffect(() => {
+        if (isOpen) loadTemplates();
+    }, [isOpen]);
+
+    const loadTemplates = () => {
+        setTemplates(db.getAllTemplates());
+    };
+
+    const footer = html`
+        <button class="btn btn-secondary" onClick=${onClose}>Close</button>
+    `;
+
+    return html`
+        <${Modal} isOpen=${isOpen} onClose=${onClose} title="Manage Card Templates" footer=${footer} width="700px">
+            <div class="profile-list">
+                ${templates.length === 0 ? html`
+                    <div class="profile-empty">No templates found. Click "Add New Template" to create one.</div>
+                ` : templates.map(template => {
+                    const config = template.config ? JSON.parse(template.config) : {};
+                    return html`
+                        <div key=${template.id} class="profile-item" style="display: flex; align-items: center;">
+                            <div style="width: 40px; height: 40px; background: ${template.is_builtin ? '#e3f2fd' : '#f5f5f5'}; border-radius: 4px; margin-right: 12px; display: flex; align-items: center; justify-content: center; font-size: 1.2rem;">
+                                ${template.is_builtin ? '📄' : '📝'}
+                            </div>
+                            <div class="profile-item-info" style="flex: 1;">
+                                <div class="profile-item-name">
+                                    ${template.name}
+                                    ${template.is_builtin ? html`<span style="font-size: 0.75rem; color: #1976d2; margin-left: 8px;">(Built-in)</span>` : ''}
+                                </div>
+                                <div class="profile-item-settings">
+                                    ${template.description || 'No description'}
+                                    ${config.pageWidthInches && config.pageHeightInches ? ` | ${config.pageWidthInches}" x ${config.pageHeightInches}"` : ''}
+                                </div>
+                            </div>
+                            <div class="profile-item-actions">
+                                <button class="btn btn-secondary" onClick=${() => { onClose(); onEditTemplate(template); }}>
+                                    ${template.is_builtin ? 'View' : 'Edit'}
+                                </button>
+                            </div>
+                        </div>
+                    `;
+                })}
+            </div>
+
+            <button
+                type="button"
+                class="btn btn-primary"
+                onClick=${() => { onClose(); onEditTemplate({}); }}
+                style="width: 100%; margin-top: 15px;"
+            >
+                + Add New Template
+            </button>
+        <//>
+    `;
+}
+
+// ============================================================
+// Sample data for template preview (Atticus)
+// ============================================================
+// Sample placeholder SVGs for preview when no real image is available
+const SAMPLE_PORTRAIT_SVG = 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200" viewBox="0 0 200 200"><rect width="200" height="200" fill="#e0e0e0"/><text x="100" y="90" text-anchor="middle" font-family="Arial" font-size="14" fill="#666">Sample</text><text x="100" y="110" text-anchor="middle" font-family="Arial" font-size="14" fill="#666">Portrait</text><circle cx="100" cy="70" r="30" fill="#ccc"/><path d="M60 140 Q100 100 140 140 L140 180 L60 180 Z" fill="#ccc"/></svg>');
+const SAMPLE_LOGO_SVG = 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100" viewBox="0 0 100 100"><rect width="100" height="100" fill="#667eea"/><text x="50" y="55" text-anchor="middle" font-family="Arial" font-size="12" fill="white">LOGO</text></svg>');
+const SAMPLE_SLUG_URL = 'https://www.wagtopia.com/search/pet?id=2553222';
+
+// Generate QR code data URL from a string (async)
+async function generateQRCodeDataUrl(text) {
     try {
-        if (rescueId) {
-            // Update existing rescue
-            db.updateRescue(parseInt(rescueId), rescueData, pendingRescueLogoData);
-            showToast(`${name} updated successfully!`);
+        return await QRCode.toDataURL(text, {
+            width: 200,
+            margin: 1,
+            color: { dark: '#000000', light: '#ffffff' }
+        });
+    } catch (err) {
+        console.error('[Preview] QR code generation failed:', err);
+        return null;
+    }
+}
+
+const PREVIEW_SAMPLE_DATA = {
+    name: 'Atticus',
+    breed: 'Boxer Terriers (Medium)',
+    ageLong: '3 years',
+    ageShort: '3 Yr',
+    size: 'Medium',
+    gender: 'Neutered(M)',
+    shots: '✓',
+    housetrained: '✓',
+    kids: '✓',
+    dogs: '?',
+    cats: '?',
+    slug: SAMPLE_SLUG_URL,
+    portraitPath: 'atticus.jpg',
+    portrait: SAMPLE_PORTRAIT_SVG,
+    rescueName: 'Paws Rescue League',
+    rescueWebsite: 'pawsrescueleague.org',
+    rescueLogo: 'logo.png',
+    logo: SAMPLE_LOGO_SVG,
+    qrcode: null, // Will be generated async
+    bio: 'Atticus is a sweet and playful 3-year-old Boxer mix who loves belly rubs and long walks. He gets along great with kids and other dogs, and is working on his leash manners. This handsome boy is looking for his forever home!',
+    attributes: ['Leash Trained', 'Crate Trained', 'Loves Belly Rubs', 'Good with Kids', 'Playful', 'Friendly']
+};
+
+// Handlebars template rendering for preview
+function renderTemplatePreview(templateHtml, data) {
+    if (!templateHtml) return '';
+    try {
+        // Register custom helpers (same as generate-card-cli.js)
+        Handlebars.registerHelper('tilde', function(context) {
+            return new Handlebars.SafeString('~' + context + '~');
+        });
+
+        // Register repeat helper for repeating card content
+        Handlebars.registerHelper('repeat', function(count, options) {
+            let result = '';
+            for (let i = 0; i < count; i++) {
+                const frameData = Handlebars.createFrame(options.data);
+                frameData.index = i;
+                result += options.fn(this, { data: frameData });
+            }
+            return result;
+        });
+
+        const template = Handlebars.compile(templateHtml);
+        return template(data);
+    } catch (err) {
+        console.error('[Preview] Handlebars error:', err.message);
+        // Return error message embedded in HTML for visibility
+        return `<!DOCTYPE html>
+<html><head><style>
+body { font-family: Arial, sans-serif; padding: 20px; background: #fff3cd; }
+.error { color: #856404; background: #fff3cd; border: 1px solid #ffc107; padding: 15px; border-radius: 8px; }
+.error h3 { margin: 0 0 10px 0; color: #856404; }
+.error pre { background: #f8f9fa; padding: 10px; border-radius: 4px; overflow-x: auto; font-size: 12px; }
+</style></head><body>
+<div class="error">
+<h3>Template Error</h3>
+<p>${err.message}</p>
+</div>
+</body></html>`;
+    }
+}
+
+// ============================================================
+// Full-Screen Template Editor
+// ============================================================
+function TemplateEditorScreen({ template, onClose, onSave, onDuplicate }) {
+    const [name, setName] = useState('');
+    const [description, setDescription] = useState('');
+    const [htmlTemplate, setHtmlTemplate] = useState('');
+    const [configStr, setConfigStr] = useState('{}');
+    const [saving, setSaving] = useState(false);
+    const [configError, setConfigError] = useState(null);
+    const [previewZoom, setPreviewZoom] = useState(0.5);
+    const [previewFullscreen, setPreviewFullscreen] = useState(false);
+    const [activeTab, setActiveTab] = useState('html');
+    const [previewAnimalId, setPreviewAnimalId] = useState('sample'); // 'sample' for hardcoded Atticus
+    const [dbAnimals, setDbAnimals] = useState([]);
+    const [dbRescues, setDbRescues] = useState([]);
+    const previewRef = useRef(null);
+    const fullscreenPreviewRef = useRef(null);
+    const showToast = useToast();
+
+    const isBuiltin = !!template?.is_builtin;
+    const isNew = !template?.id;
+
+    // Load animals and rescues from database
+    useEffect(() => {
+        const animals = db.getAllAnimals();
+        const rescues = db.getAllRescues();
+        setDbAnimals(animals);
+        setDbRescues(rescues);
+    }, []);
+
+    // Get current preview data based on selected animal (without QR code - that's async)
+    const getPreviewData = () => {
+        if (previewAnimalId === 'sample') {
+            return { ...PREVIEW_SAMPLE_DATA };
+        }
+        const animal = dbAnimals.find(a => a.id === parseInt(previewAnimalId));
+        if (!animal) return { ...PREVIEW_SAMPLE_DATA };
+
+        const rescue = dbRescues.find(r => r.id === animal.rescue_id);
+
+        // Get actual image data URLs from database
+        const portraitDataUrl = db.getImageAsDataUrl(animal.id) || SAMPLE_PORTRAIT_SVG;
+        const logoDataUrl = rescue ? (db.getRescueLogoAsDataUrl(rescue.id) || SAMPLE_LOGO_SVG) : SAMPLE_LOGO_SVG;
+
+        // Parse attributes JSON if it's a string
+        let attributes = [];
+        if (animal.attributes) {
+            try {
+                attributes = typeof animal.attributes === 'string' ? JSON.parse(animal.attributes) : animal.attributes;
+            } catch (e) {
+                attributes = [];
+            }
+        }
+
+        return {
+            name: animal.name || '',
+            breed: animal.breed || '',
+            ageLong: animal.age_long || '',
+            ageShort: animal.age_short || '',
+            size: animal.size || '',
+            gender: animal.gender || '',
+            shots: animal.shots ? '✓' : '✗',
+            housetrained: animal.housetrained ? '✓' : '✗',
+            kids: animal.kids === true ? '✓' : (animal.kids === false ? '✗' : '?'),
+            dogs: animal.dogs === true ? '✓' : (animal.dogs === false ? '✗' : '?'),
+            cats: animal.cats === true ? '✓' : (animal.cats === false ? '✗' : '?'),
+            slug: animal.slug || '',
+            portraitPath: animal.portrait_path || '',
+            portrait: portraitDataUrl,
+            rescueName: rescue?.name || '',
+            rescueWebsite: rescue?.website || '',
+            rescueLogo: rescue?.logo_path || '',
+            logo: logoDataUrl,
+            qrcode: null, // Will be generated async
+            bio: animal.bio || '',
+            attributes: attributes
+        };
+    };
+
+    const previewData = getPreviewData();
+    const previewAnimalName = previewAnimalId === 'sample' ? 'Atticus (Sample)' : (dbAnimals.find(a => a.id === parseInt(previewAnimalId))?.name || 'Unknown');
+
+    useEffect(() => {
+        if (template?.id) {
+            const fullTemplate = db.getTemplateById(template.id);
+            setName(fullTemplate?.name || '');
+            setDescription(fullTemplate?.description || '');
+            setHtmlTemplate(fullTemplate?.html_template || '');
+            setConfigStr(fullTemplate?.config ? JSON.stringify(fullTemplate.config, null, 2) : '{}');
         } else {
-            // Create new rescue
-            db.createRescue(rescueData, pendingRescueLogoData);
-            showToast(`${name} created successfully!`);
+            setName('');
+            setDescription('');
+            setHtmlTemplate(getDefaultTemplateHtml());
+            setConfigStr(JSON.stringify(getDefaultTemplateConfig(), null, 2));
+        }
+        setConfigError(null);
+    }, [template]);
+
+    // Update preview iframe when template or preview animal changes
+    useEffect(() => {
+        let cancelled = false;
+
+        const updatePreview = async () => {
+            const currentPreviewData = getPreviewData();
+
+            // Generate real QR code from slug
+            const slugForQR = currentPreviewData.slug || SAMPLE_SLUG_URL;
+            const qrCodeDataUrl = await generateQRCodeDataUrl(slugForQR);
+            if (qrCodeDataUrl) {
+                currentPreviewData.qrcode = qrCodeDataUrl;
+            }
+
+            if (cancelled) return;
+
+            const updateIframe = (iframe) => {
+                if (!iframe) return;
+                const renderedHtml = renderTemplatePreview(htmlTemplate, currentPreviewData);
+                const doc = iframe.contentDocument || iframe.contentWindow.document;
+                doc.open();
+                doc.write(renderedHtml);
+                doc.close();
+            };
+
+            updateIframe(previewRef.current);
+            if (previewFullscreen) {
+                updateIframe(fullscreenPreviewRef.current);
+            }
+        };
+
+        updatePreview();
+
+        return () => { cancelled = true; };
+    }, [htmlTemplate, previewFullscreen, previewAnimalId, dbAnimals, dbRescues]);
+
+    const validateConfig = (str) => {
+        try {
+            JSON.parse(str);
+            setConfigError(null);
+            return true;
+        } catch (e) {
+            setConfigError('Invalid JSON: ' + e.message);
+            return false;
+        }
+    };
+
+    const handleConfigChange = (value) => {
+        setConfigStr(value);
+        validateConfig(value);
+    };
+
+    const handleSave = async () => {
+        if (isBuiltin) {
+            showToast('Cannot modify built-in templates', 'error');
+            return;
         }
 
-        closeEditRescueModal();
-        loadRescueList();
+        if (!name.trim()) {
+            showToast('Please enter a template name', 'error');
+            return;
+        }
 
-        // Refresh the rescues cache and update dropdowns
-        rescues = db.getAllRescues();
-        updateRescueDropdowns();
+        if (!htmlTemplate.trim()) {
+            showToast('Please enter template HTML', 'error');
+            return;
+        }
 
-    } catch (err) {
-        console.error('[App] Error saving rescue:', err);
-        showToast('Error saving rescue: ' + err.message, 'error');
+        if (!validateConfig(configStr)) {
+            showToast('Please fix the JSON configuration errors', 'error');
+            return;
+        }
+
+        setSaving(true);
+        try {
+            const templateData = {
+                name: name.trim(),
+                description: description.trim() || null,
+                html_template: htmlTemplate,
+                config: JSON.parse(configStr),
+                is_builtin: false
+            };
+
+            if (template?.id && !isBuiltin) {
+                db.updateTemplate(template.id, templateData);
+                showToast(`${name} updated successfully!`);
+            } else {
+                db.createTemplate(templateData);
+                showToast(`${name} created successfully!`);
+            }
+
+            if (onSave) onSave();
+            onClose();
+        } catch (err) {
+            showToast(`Error: ${err.message}`, 'error');
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    const handleDelete = () => {
+        if (!template?.id || isBuiltin) return;
+        if (!confirm(`Are you sure you want to delete "${template.name}"?\n\nThis cannot be undone.`)) return;
+
+        try {
+            db.deleteTemplate(template.id);
+            showToast(`${template.name} deleted successfully!`);
+            if (onSave) onSave();
+            onClose();
+        } catch (err) {
+            showToast(`Error: ${err.message}`, 'error');
+        }
+    };
+
+    const handleDuplicate = () => {
+        if (!template?.id) return;
+        const fullTemplate = db.getTemplateById(template.id);
+
+        try {
+            // Create a new template in the database
+            const templateData = {
+                name: (fullTemplate.name || 'Template') + ' (Copy)',
+                description: fullTemplate.description || null,
+                html_template: fullTemplate.html_template,
+                config: fullTemplate.config || {},
+                is_builtin: false
+            };
+
+            const result = db.createTemplate(templateData);
+            const newTemplateId = result.lastInsertRowid;
+
+            // Notify parent to reload templates
+            if (onSave) onSave();
+
+            // Get the newly created template and open it for editing
+            const newTemplate = db.getTemplateById(newTemplateId);
+            showToast(`Template duplicated as "${templateData.name}". Opening for editing.`);
+
+            // Use onDuplicate callback to switch to the new template
+            if (onDuplicate) {
+                onDuplicate(newTemplate);
+            }
+        } catch (err) {
+            showToast(`Error duplicating template: ${err.message}`, 'error');
+        }
+    };
+
+    // Fullscreen preview overlay
+    if (previewFullscreen) {
+        return html`
+            <div class="template-editor-fullscreen-preview" onClick=${() => setPreviewFullscreen(false)}>
+                <div class="fullscreen-preview-header">
+                    <span>Preview: ${name || 'Untitled'} (Sample: Atticus)</span>
+                    <div class="fullscreen-preview-controls">
+                        <button class="btn btn-secondary" onClick=${(e) => { e.stopPropagation(); setPreviewZoom(z => Math.max(0.25, z - 0.25)); }}>-</button>
+                        <span style="min-width: 60px; text-align: center;">${Math.round(previewZoom * 100)}%</span>
+                        <button class="btn btn-secondary" onClick=${(e) => { e.stopPropagation(); setPreviewZoom(z => Math.min(2, z + 0.25)); }}>+</button>
+                        <button class="btn btn-primary" onClick=${(e) => { e.stopPropagation(); setPreviewFullscreen(false); }} style="margin-left: 20px;">Close</button>
+                    </div>
+                </div>
+                <div class="fullscreen-preview-container" onClick=${(e) => e.stopPropagation()}>
+                    <iframe
+                        ref=${fullscreenPreviewRef}
+                        style="transform: scale(${previewZoom}); transform-origin: top center; width: ${100/previewZoom}%; height: ${100/previewZoom}%; border: none; background: white;"
+                        title="Template Preview Fullscreen"
+                        sandbox="allow-same-origin"
+                    />
+                </div>
+            </div>
+        `;
     }
-}
 
-async function deleteCurrentRescue() {
-    if (!currentEditRescue) return;
-
-    const confirmed = confirm(`Are you sure you want to delete "${currentEditRescue.name}"?\n\nThis cannot be undone.`);
-    if (!confirmed) return;
-
+    // Parse config for preview sizing
+    let previewConfig = { pageWidthInches: 11, pageHeightInches: 8.5, orientation: 'landscape' };
     try {
-        db.deleteRescue(currentEditRescue.id);
-        showToast(`${currentEditRescue.name} deleted successfully!`);
+        const parsed = JSON.parse(configStr);
+        if (parsed.pageWidthInches) previewConfig.pageWidthInches = parsed.pageWidthInches;
+        if (parsed.pageHeightInches) previewConfig.pageHeightInches = parsed.pageHeightInches;
+        if (parsed.orientation) previewConfig.orientation = parsed.orientation;
+    } catch (e) {}
 
-        closeEditRescueModal();
-        loadRescueList();
+    // Calculate preview dimensions based on config
+    const previewWidth = previewConfig.orientation === 'landscape'
+        ? Math.max(previewConfig.pageWidthInches, previewConfig.pageHeightInches)
+        : Math.min(previewConfig.pageWidthInches, previewConfig.pageHeightInches);
+    const previewHeight = previewConfig.orientation === 'landscape'
+        ? Math.min(previewConfig.pageWidthInches, previewConfig.pageHeightInches)
+        : Math.max(previewConfig.pageWidthInches, previewConfig.pageHeightInches);
 
-        // Refresh the rescues cache and update dropdowns
-        rescues = db.getAllRescues();
-        updateRescueDropdowns();
+    return html`
+        <div class="template-editor-screen">
+            <!-- Header with name and description -->
+            <div class="template-editor-header">
+                <div class="template-editor-title">
+                    <button class="btn btn-secondary" onClick=${onClose} style="margin-right: 15px;">
+                        ← Back
+                    </button>
+                    <div class="template-editor-name-desc">
+                        <input
+                            type="text"
+                            class="template-name-input"
+                            placeholder=${isNew ? 'Template Name *' : 'Untitled'}
+                            value=${name}
+                            onInput=${(e) => setName(e.target.value)}
+                            disabled=${isBuiltin}
+                        />
+                        <input
+                            type="text"
+                            class="template-desc-input"
+                            placeholder="Description (optional)"
+                            value=${description}
+                            onInput=${(e) => setDescription(e.target.value)}
+                            disabled=${isBuiltin}
+                        />
+                    </div>
+                    ${isBuiltin && html`<span class="builtin-badge">Built-in (Read Only)</span>`}
+                </div>
+                <div class="template-editor-actions">
+                    ${!isNew && isBuiltin && html`
+                        <button class="btn btn-secondary" onClick=${handleDuplicate}>Duplicate as New</button>
+                    `}
+                    ${!isNew && !isBuiltin && html`
+                        <button class="btn btn-danger" onClick=${handleDelete}>Delete</button>
+                    `}
+                    ${!isBuiltin && html`
+                        <button class="btn btn-primary" onClick=${handleSave} disabled=${saving || !!configError}>
+                            ${saving ? 'Saving...' : (isNew ? 'Create Template' : 'Save Changes')}
+                        </button>
+                    `}
+                </div>
+            </div>
 
-    } catch (err) {
-        console.error('[App] Error deleting rescue:', err);
-        showToast('Error: ' + err.message, 'error');
-    }
+            <!-- Main content -->
+            <div class="template-editor-content">
+                <!-- Left panel: Editor -->
+                <div class="template-editor-left">
+                    <!-- Tabs -->
+                    <div class="template-editor-tabs">
+                        <button
+                            class=${`tab-btn ${activeTab === 'html' ? 'active' : ''}`}
+                            onClick=${() => setActiveTab('html')}
+                        >
+                            HTML Template
+                        </button>
+                        <button
+                            class=${`tab-btn ${activeTab === 'config' ? 'active' : ''}`}
+                            onClick=${() => setActiveTab('config')}
+                        >
+                            Configuration
+                            ${configError && html`<span class="tab-error">!</span>`}
+                        </button>
+                        <button
+                            class=${`tab-btn ${activeTab === 'help' ? 'active' : ''}`}
+                            onClick=${() => setActiveTab('help')}
+                        >
+                            Variables
+                        </button>
+                    </div>
+
+                    <!-- Tab content -->
+                    <div class="template-editor-tab-content">
+                        ${activeTab === 'html' && html`
+                            <${CodeMirrorEditor}
+                                value=${htmlTemplate}
+                                onChange=${setHtmlTemplate}
+                                language="html"
+                                disabled=${isBuiltin}
+                                placeholder="<!DOCTYPE html>..."
+                            />
+                        `}
+                        ${activeTab === 'config' && html`
+                            <${CodeMirrorEditor}
+                                value=${configStr}
+                                onChange=${handleConfigChange}
+                                language="json"
+                                disabled=${isBuiltin}
+                                placeholder="{}"
+                            />
+                            ${configError && html`
+                                <div class="config-error">${configError}</div>
+                            `}
+                        `}
+                        ${activeTab === 'help' && html`
+                            <div class="variables-help">
+                                <h4>Sample Values (${previewAnimalName})</h4>
+                                <table class="variables-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Variable</th>
+                                            <th>Value</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        ${Object.entries(previewData).map(([key, value]) => {
+                                            const isImageValue = typeof value === 'string' && value.startsWith('data:image/');
+                                            return html`
+                                                <tr key=${key}>
+                                                    <td><code>{{${key}}}</code></td>
+                                                    <td class="variable-value">${
+                                                        isImageValue
+                                                            ? html`<img src=${value} alt=${key} style="width: 40px; height: 40px; object-fit: contain; border-radius: 4px; background: #f5f5f5;" />`
+                                                            : value
+                                                    }</td>
+                                                </tr>
+                                            `;
+                                        })}
+                                    </tbody>
+                                </table>
+
+                                <h4 style="margin-top: 20px;">Configuration Options</h4>
+                                <pre>${JSON.stringify({
+                                    pageWidthInches: 11,
+                                    pageHeightInches: 8.5,
+                                    orientation: 'landscape',
+                                    paperSize: 'letter',
+                                    dpi: 360,
+                                    preprocessing: {
+                                        generateQrCode: true,
+                                        qrCodeSource: 'slug',
+                                        convertBooleans: true
+                                    }
+                                }, null, 2)}</pre>
+                            </div>
+                        `}
+                    </div>
+                </div>
+
+                <!-- Right panel: Preview -->
+                <div class="template-editor-right">
+                    <div class="preview-header">
+                        <div class="preview-animal-select">
+                            <label>Preview:</label>
+                            <select value=${previewAnimalId} onChange=${(e) => setPreviewAnimalId(e.target.value)}>
+                                <option value="sample">Atticus (Sample)</option>
+                                ${dbAnimals.length > 0 && html`<option disabled>──────────</option>`}
+                                ${dbAnimals.map(animal => html`
+                                    <option key=${animal.id} value=${animal.id}>${animal.name}</option>
+                                `)}
+                            </select>
+                        </div>
+                        <div class="preview-controls">
+                            <button class="btn btn-sm" onClick=${() => setPreviewZoom(z => Math.max(0.25, z - 0.1))}>-</button>
+                            <span>${Math.round(previewZoom * 100)}%</span>
+                            <button class="btn btn-sm" onClick=${() => setPreviewZoom(z => Math.min(1.5, z + 0.1))}>+</button>
+                            <button class="btn btn-sm" onClick=${() => setPreviewFullscreen(true)} title="Fullscreen">⛶</button>
+                        </div>
+                    </div>
+                    <div class="preview-container" onClick=${() => setPreviewFullscreen(true)} title="Click for fullscreen">
+                        <div class="preview-page-wrapper" style="transform: scale(${previewZoom}); transform-origin: top left;">
+                            <iframe
+                                ref=${previewRef}
+                                style="width: ${previewWidth}in; height: ${previewHeight}in; border: none; background: white; pointer-events: none;"
+                                title="Template Preview"
+                                sandbox="allow-same-origin"
+                            />
+                        </div>
+                    </div>
+                    <div class="preview-info">
+                        ${previewWidth}" × ${previewHeight}" (${previewConfig.orientation})
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
 }
 
-// Update all rescue dropdown selects with current rescues
-function updateRescueDropdowns() {
-    const dropdownIds = ['newRescue', 'rescue'];
-
-    for (const dropdownId of dropdownIds) {
-        const dropdown = document.getElementById(dropdownId);
-        if (!dropdown) continue;
-
-        // Store current selection
-        const currentValue = dropdown.value;
-
-        // Clear and repopulate
-        dropdown.innerHTML = '';
-
-        for (const rescue of rescues) {
-            const option = document.createElement('option');
-            option.value = rescue.id;
-            option.textContent = rescue.name;
-            dropdown.appendChild(option);
+function getDefaultTemplateHtml() {
+    return `<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <style>
+        body { margin: 0; padding: 0; font-family: Arial, sans-serif; }
+        #page {
+            display: grid;
+            grid-template-columns: repeat(5, 2in);
+            grid-template-rows: repeat(2, 3.5in);
+            width: 11in;
+            height: 8.5in;
+            background: #fff;
         }
-
-        // Restore selection if still valid
-        if (currentValue && rescues.find(r => r.id == currentValue)) {
-            dropdown.value = currentValue;
-        } else if (rescues.length > 0) {
-            dropdown.value = rescues[0].id;
+        .card {
+            width: 2in;
+            height: 3.5in;
+            padding: 10px;
+            box-sizing: border-box;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
         }
-    }
+    </style>
+</head>
+<body>
+    <div id="page">
+        <div class="card">
+            <h2>{{name}}</h2>
+            <p>{{breed}}</p>
+            <p>Age: {{ageShort}}</p>
+        </div>
+    </div>
+</body>
+</html>`;
 }
 
-// Add event listener for clicking outside the modal
-document.getElementById('manageRescuesModal').addEventListener('click', (e) => {
-    if (e.target.classList.contains('modal-overlay')) {
-        closeManageRescuesModal();
-    }
-});
+function getDefaultTemplateConfig() {
+    return {
+        pageWidthInches: 11,
+        pageHeightInches: 8.5,
+        orientation: 'landscape',
+        paperSize: 'letter',
+        dpi: 360,
+        preprocessing: {
+            generateQrCode: false,
+            convertBooleans: true,
+            booleanFields: ['shots', 'housetrained'],
+            triStateFields: ['kids', 'dogs', 'cats'],
+            preparePortrait: true,
+            prepareLogo: true
+        },
+        outputNamePattern: '{name}-custom.png'
+    };
+}
 
-document.getElementById('editRescueModal').addEventListener('click', (e) => {
-    if (e.target.classList.contains('modal-overlay')) {
-        closeEditRescueModal();
+// ============================================================
+// Header Component
+// ============================================================
+function Header({ subtitle }) {
+    return html`
+        <header>
+            <h1>Foster Animals</h1>
+            <p id="subtitle">${subtitle}</p>
+        </header>
+    `;
+}
+
+// ============================================================
+// Control Bar Component
+// ============================================================
+function ControlBar({
+    onCreateClick,
+    onRefreshClick,
+    onPrintMultipleClick,
+    onDeleteMultipleClick,
+    onSettingsClick
+}) {
+    return html`
+        <div class="controls">
+            <button onClick=${onCreateClick}>Create Animal</button>
+            <button onClick=${onRefreshClick}>Refresh</button>
+            <button onClick=${onPrintMultipleClick}>Print Multiple</button>
+            <button class="btn-danger-outline" onClick=${onDeleteMultipleClick}>Delete Multiple</button>
+            <button class="btn-settings" onClick=${onSettingsClick}>Settings</button>
+        </div>
+    `;
+}
+
+// ============================================================
+// Animal Grid Component
+// ============================================================
+function AnimalGrid({ animals, rescues, onEdit, onPrintFront, onPrintBack, onPrintFlyer, customTemplates, onPrintWithTemplate }) {
+    if (animals.length === 0) {
+        return html`
+            <div class="loading">No animals found. Create one to get started.</div>
+        `;
     }
+
+    return html`
+        <div class="animals-grid">
+            ${animals.map(animal => {
+                const rescue = rescues.find(r => r.id === animal.rescue_id);
+                return html`
+                    <${AnimalCard}
+                        key=${animal.id}
+                        animal=${animal}
+                        rescue=${rescue}
+                        onEdit=${onEdit}
+                        onPrintFront=${onPrintFront}
+                        onPrintBack=${onPrintBack}
+                        onPrintFlyer=${onPrintFlyer}
+                        customTemplates=${customTemplates}
+                        onPrintWithTemplate=${onPrintWithTemplate}
+                    />
+                `;
+            })}
+        </div>
+    `;
+}
+
+// ============================================================
+// Main App Component
+// ============================================================
+function App() {
+    // State
+    const [animals, setAnimals] = useState([]);
+    const [rescues, setRescues] = useState([]);
+    const [loading, setLoading] = useState(true);
+    const [error, setError] = useState(null);
+    const [subtitle, setSubtitle] = useState('Loading...');
+
+    // Modal states
+    const [showCreateOptions, setShowCreateOptions] = useState(false);
+    const [showRescueSelect, setShowRescueSelect] = useState(false);
+    const [showScrape, setShowScrape] = useState(false);
+    const [showManualEntry, setShowManualEntry] = useState(false);
+    const [showSelectFromSite, setShowSelectFromSite] = useState(false);
+    const [showDeleteMultiple, setShowDeleteMultiple] = useState(false);
+    const [showPrintMultiple, setShowPrintMultiple] = useState(false);
+    const [showSettings, setShowSettings] = useState(false);
+    const [editingTemplateFullscreen, setEditingTemplateFullscreen] = useState(null);
+    const [showPrintSettings, setShowPrintSettings] = useState(false);
+
+    // Edit state
+    const [editingAnimal, setEditingAnimal] = useState(null);
+    const [selectedRescue, setSelectedRescue] = useState('wagtopia');
+    const [manualEntryData, setManualEntryData] = useState(null);
+    const [printFilePath, setPrintFilePath] = useState(null);
+    const [printCallback, setPrintCallback] = useState(null);
+    const [printTemplateConfig, setPrintTemplateConfig] = useState(null);
+
+    // Print queue
+    const [cardQueue, setCardQueue] = useState([]);
+    const [processingQueue, setProcessingQueue] = useState(false);
+
+    // Printers cache
+    const [printers, setPrinters] = useState([]);
+
+    // Custom templates for printing
+    const [customTemplates, setCustomTemplates] = useState([]);
+
+    const showToast = useToast();
+
+    // Load custom templates function (can be called to refresh)
+    const loadTemplates = () => {
+        const allTemplates = db.getAllTemplates();
+        const custom = allTemplates.filter(t => !t.is_builtin);
+        setCustomTemplates(custom);
+    };
+
+    // Initialize app
+    useEffect(() => {
+        (async () => {
+            try {
+                log('========== Electron app ready ==========');
+                const { dbDir, dbPath } = await db.initializeAsync();
+                DB_DIR = dbDir;
+                DB_PATH = dbPath;
+                LOG_DIR = DB_DIR;
+                LOG_FILE = path.join(DB_DIR, 'app.log');
+                loggingReady = true;
+                log('[App] Database initialized at:', DB_PATH);
+                await loadAnimals();
+                // Load custom templates (non-builtin) for printing
+                loadTemplates();
+            } catch (err) {
+                console.error('[App] Initialization error:', err);
+                setError(err.message);
+                setLoading(false);
+            }
+        })();
+    }, []);
+
+    // Load printers on mount
+    useEffect(() => {
+        (async () => {
+            try {
+                const result = await ipcRenderer.invoke('get-printers');
+                if (result.success) setPrinters(result.printers);
+            } catch (err) {
+                console.error('[App] Error loading printers:', err);
+            }
+        })();
+    }, []);
+
+    // Process print queue
+    useEffect(() => {
+        if (processingQueue || cardQueue.length === 0) return;
+
+        const processNext = async () => {
+            setProcessingQueue(true);
+            const task = cardQueue[0];
+            const animal = animals.find(a => a.id === task.animalId);
+
+            if (!animal) {
+                setCardQueue(prev => prev.slice(1));
+                setProcessingQueue(false);
+                return;
+            }
+
+            try {
+                showToast(`Generating cards for ${animal.name}...`);
+                await printCard(animal, 'front');
+                await printCard(animal, 'back');
+                showToast(`Cards generated for ${animal.name}!`);
+            } catch (err) {
+                console.error('[Queue] Error:', err);
+                showToast(`Error generating cards: ${err.message}`, 'error');
+            }
+
+            setCardQueue(prev => prev.slice(1));
+            setProcessingQueue(false);
+        };
+
+        processNext();
+    }, [cardQueue, processingQueue, animals]);
+
+    const loadAnimals = async () => {
+        setLoading(true);
+        try {
+            const allRescues = db.getAllRescues();
+            setRescues(allRescues);
+
+            const allAnimals = db.getAllAnimals();
+            for (const animal of allAnimals) {
+                animal.imageDataUrl = db.getImageAsDataUrl(animal.id);
+            }
+            setAnimals(allAnimals);
+            setSubtitle(allAnimals.length > 0
+                ? `${allAnimals.length} animals available for adoption`
+                : 'No animals in database'
+            );
+        } catch (err) {
+            console.error('[App] Error loading animals:', err);
+            setError(err.message);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const printCard = async (animal, side) => {
+        const rescue = db.getRescueById(animal.rescue_id || 1);
+
+        // Get image data URLs for templates
+        const portraitDataUrl = db.getImageAsDataUrl(animal.id);
+        const logoDataUrl = rescue ? db.getRescueLogoAsDataUrl(rescue.id) : null;
+
+        const params = {
+            name: animal.name,
+            breed: animal.breed,
+            ageShort: animal.age_short,
+            ageLong: animal.age_long,
+            size: animal.size,
+            gender: animal.gender,
+            shots: animal.shots,
+            housetrained: animal.housetrained,
+            kids: animal.kids,
+            dogs: animal.dogs,
+            cats: animal.cats,
+            slug: animal.slug,
+            portrait: portraitDataUrl || '',
+            rescueName: rescue?.name || 'Paws Rescue League',
+            rescueWebsite: rescue?.website || 'pawsrescueleague.org',
+            logo: logoDataUrl || ''
+        };
+
+        const generateFn = side === 'front' ? generateCardFront : generateCardBack;
+        const outputPath = await generateFn(params);
+
+        if (process.platform === 'win32') {
+            // Get template config for the print dialog
+            const templateName = side === 'front' ? 'card-front' : 'card-back';
+            let templateConfig = null;
+            try {
+                const template = db.getTemplateByName(templateName);
+                if (template && template.config) {
+                    templateConfig = template.config;
+                }
+            } catch (err) {
+                console.log('[App] Could not load template config:', err.message);
+            }
+
+            return new Promise((resolve) => {
+                setPrintFilePath(outputPath);
+                setPrintTemplateConfig(templateConfig);
+                setPrintCallback(() => (success) => {
+                    setShowPrintSettings(false);
+                    setPrintFilePath(null);
+                    setPrintTemplateConfig(null);
+                    setPrintCallback(null);
+                    resolve(success);
+                });
+                setShowPrintSettings(true);
+            });
+        } else {
+            const result = await ipcRenderer.invoke('open-in-gimp', outputPath);
+            if (!result.success) {
+                showToast('Could not launch GIMP. Is it installed?', 'error');
+            }
+        }
+    };
+
+    const printFlyer = async (animal) => {
+        const rescue = db.getRescueById(animal.rescue_id || 1);
+
+        // Get image data URLs for templates
+        const portraitDataUrl = db.getImageAsDataUrl(animal.id);
+        const logoDataUrl = rescue ? db.getRescueLogoAsDataUrl(rescue.id) : null;
+
+        // Get stored attributes, or build from animal data as fallback
+        let traits = db.getAnimalAttributes(animal.id);
+        if (!traits || traits.length === 0) {
+            // Fallback: build traits list from animal data for the flyer template
+            traits = [];
+            if (animal.breed) traits.push(animal.breed);
+            if (animal.age_long) traits.push(animal.age_long);
+            if (animal.size) traits.push(animal.size);
+            if (animal.gender) traits.push(animal.gender);
+            if (animal.shots) traits.push('Up to date on shots');
+            if (animal.housetrained) traits.push('Housetrained');
+            if (animal.kids === 1) traits.push('Good with kids');
+            if (animal.dogs === 1) traits.push('Good with dogs');
+            if (animal.cats === 1) traits.push('Good with cats');
+        }
+
+        const params = {
+            name: animal.name,
+            breed: animal.breed,
+            ageShort: animal.age_short,
+            ageLong: animal.age_long,
+            size: animal.size,
+            gender: animal.gender,
+            shots: animal.shots,
+            housetrained: animal.housetrained,
+            kids: animal.kids,
+            dogs: animal.dogs,
+            cats: animal.cats,
+            slug: animal.slug,
+            portrait: portraitDataUrl || '',
+            rescueName: rescue?.name || 'Paws Rescue League',
+            rescueWebsite: rescue?.website || 'pawsrescueleague.org',
+            logo: logoDataUrl || '',
+            // Add trait fields for the flyer template (up to 16)
+            trait1: traits[0] || '',
+            trait2: traits[1] || '',
+            trait3: traits[2] || '',
+            trait4: traits[3] || '',
+            trait5: traits[4] || '',
+            trait6: traits[5] || '',
+            trait7: traits[6] || '',
+            trait8: traits[7] || '',
+            trait9: traits[8] || '',
+            trait10: traits[9] || '',
+            trait11: traits[10] || '',
+            trait12: traits[11] || '',
+            trait13: traits[12] || '',
+            trait14: traits[13] || '',
+            trait15: traits[14] || '',
+            trait16: traits[15] || ''
+        };
+
+        // Get the adoption-flyer template from database
+        const template = db.getTemplateByName('adoption-flyer');
+        if (!template) {
+            throw new Error('Adoption flyer template not found. Please check your templates.');
+        }
+
+        const outputPath = await generateFromTemplate(template, params);
+
+        if (process.platform === 'win32') {
+            // Get template config for the print dialog
+            let templateConfig = null;
+            try {
+                if (template && template.config) {
+                    templateConfig = typeof template.config === 'string'
+                        ? JSON.parse(template.config)
+                        : template.config;
+                }
+            } catch (err) {
+                console.log('[App] Could not load template config:', err.message);
+            }
+
+            return new Promise((resolve) => {
+                setPrintFilePath(outputPath);
+                setPrintTemplateConfig(templateConfig);
+                setPrintCallback(() => (success) => {
+                    setShowPrintSettings(false);
+                    setPrintFilePath(null);
+                    setPrintTemplateConfig(null);
+                    setPrintCallback(null);
+                    resolve(success);
+                });
+                setShowPrintSettings(true);
+            });
+        } else {
+            const result = await ipcRenderer.invoke('open-in-gimp', outputPath);
+            if (!result.success) {
+                showToast('Could not launch GIMP. Is it installed?', 'error');
+            }
+        }
+    };
+
+    const handleScrape = async (url) => {
+        try {
+            showToast('Scraping data from URL...');
+            const ipcChannel = selectedRescue === 'adoptapet'
+                ? 'scrape-animal-page-adoptapet'
+                : 'scrape-animal-page-wagtopia';
+
+            const result = await ipcRenderer.invoke(ipcChannel, url);
+            if (!result.success) throw new Error(result.error);
+
+            const scrapedData = result.data;
+            let imageData = null;
+
+            if (scrapedData.imagePath) {
+                try {
+                    const imagePath = path.isAbsolute(scrapedData.imagePath)
+                        ? scrapedData.imagePath
+                        : path.join(APP_PATH, scrapedData.imagePath);
+                    const buffer = fs.readFileSync(imagePath);
+                    imageData = bufferToImageData(buffer, imagePath);
+                    fs.unlinkSync(imagePath);
+                } catch (imgErr) {
+                    console.error('Error loading scraped image:', imgErr);
+                }
+            }
+
+            setManualEntryData({
+                ...scrapedData,
+                imageDataUrl: imageData?.dataUrl || null,
+                imageData
+            });
+            setShowScrape(false);
+            setShowManualEntry(true);
+            showToast('Data scraped successfully!');
+        } catch (err) {
+            showToast(`Error scraping URL: ${err.message}`, 'error');
+        }
+    };
+
+    const handlePrintFront = async (animalId) => {
+        const animal = animals.find(a => a.id === animalId);
+        if (!animal) return;
+        try {
+            showToast(`Generating card front for ${animal.name}...`);
+            await printCard(animal, 'front');
+        } catch (err) {
+            showToast(`Error: ${err.message}`, 'error');
+        }
+    };
+
+    const handlePrintBack = async (animalId) => {
+        const animal = animals.find(a => a.id === animalId);
+        if (!animal) return;
+        try {
+            showToast(`Generating card back for ${animal.name}...`);
+            await printCard(animal, 'back');
+        } catch (err) {
+            showToast(`Error: ${err.message}`, 'error');
+        }
+    };
+
+    const handlePrintFlyer = async (animalId) => {
+        const animal = animals.find(a => a.id === animalId);
+        if (!animal) return;
+        try {
+            showToast(`Generating adoption flyer for ${animal.name}...`);
+            await printFlyer(animal);
+        } catch (err) {
+            showToast(`Error: ${err.message}`, 'error');
+        }
+    };
+
+    const handlePrintWithTemplate = async (animalId, templateId) => {
+        const animal = animals.find(a => a.id === animalId);
+        if (!animal) return;
+
+        const template = db.getTemplateById(templateId);
+        if (!template) {
+            showToast('Template not found', 'error');
+            return;
+        }
+
+        try {
+            showToast(`Generating ${template.name} for ${animal.name}...`);
+
+            const rescue = db.getRescueById(animal.rescue_id || 1);
+            const portraitDataUrl = db.getImageAsDataUrl(animal.id);
+            const logoDataUrl = rescue ? db.getRescueLogoAsDataUrl(rescue.id) : null;
+
+            // Get stored attributes, or build from animal data as fallback
+            let traits = db.getAnimalAttributes(animal.id);
+            if (!traits || traits.length === 0) {
+                traits = [];
+                if (animal.breed) traits.push(animal.breed);
+                if (animal.age_long) traits.push(animal.age_long);
+                if (animal.size) traits.push(animal.size);
+                if (animal.gender) traits.push(animal.gender);
+                if (animal.shots) traits.push('Up to date on shots');
+                if (animal.housetrained) traits.push('Housetrained');
+                if (animal.kids === 1) traits.push('Good with kids');
+                if (animal.dogs === 1) traits.push('Good with dogs');
+                if (animal.cats === 1) traits.push('Good with cats');
+            }
+
+            const params = {
+                name: animal.name,
+                breed: animal.breed,
+                ageShort: animal.age_short,
+                ageLong: animal.age_long,
+                size: animal.size,
+                gender: animal.gender,
+                shots: animal.shots,
+                housetrained: animal.housetrained,
+                kids: animal.kids,
+                dogs: animal.dogs,
+                cats: animal.cats,
+                slug: animal.slug,
+                bio: animal.bio || '',
+                portrait: portraitDataUrl || '',
+                rescueName: rescue?.name || 'Paws Rescue League',
+                rescueWebsite: rescue?.website || 'pawsrescueleague.org',
+                logo: logoDataUrl || '',
+                // Add trait fields (up to 16)
+                trait1: traits[0] || '',
+                trait2: traits[1] || '',
+                trait3: traits[2] || '',
+                trait4: traits[3] || '',
+                trait5: traits[4] || '',
+                trait6: traits[5] || '',
+                trait7: traits[6] || '',
+                trait8: traits[7] || '',
+                trait9: traits[8] || '',
+                trait10: traits[9] || '',
+                trait11: traits[10] || '',
+                trait12: traits[11] || '',
+                trait13: traits[12] || '',
+                trait14: traits[13] || '',
+                trait15: traits[14] || '',
+                trait16: traits[15] || ''
+            };
+
+            const outputPath = await generateFromTemplate(template, params);
+
+            if (process.platform === 'win32') {
+                let templateConfig = null;
+                try {
+                    if (template.config) {
+                        templateConfig = typeof template.config === 'string'
+                            ? JSON.parse(template.config)
+                            : template.config;
+                    }
+                } catch (err) {
+                    console.log('[App] Could not load template config:', err.message);
+                }
+
+                return new Promise((resolve) => {
+                    setPrintFilePath(outputPath);
+                    setPrintTemplateConfig(templateConfig);
+                    setPrintCallback(() => (success) => {
+                        setShowPrintSettings(false);
+                        setPrintFilePath(null);
+                        setPrintTemplateConfig(null);
+                        setPrintCallback(null);
+                        resolve(success);
+                    });
+                    setShowPrintSettings(true);
+                });
+            } else {
+                const result = await ipcRenderer.invoke('open-in-gimp', outputPath);
+                if (!result.success) {
+                    showToast('Could not launch GIMP. Is it installed?', 'error');
+                }
+            }
+        } catch (err) {
+            showToast(`Error: ${err.message}`, 'error');
+        }
+    };
+
+    const handlePrintMultiple = (animalIds) => {
+        for (const id of animalIds) {
+            setCardQueue(prev => [...prev, { animalId: id }]);
+        }
+    };
+
+    if (error) {
+        return html`
+            <div class="container">
+                <${Header} subtitle="Error" />
+                <div class="error">
+                    <h3>Error</h3>
+                    <p>${error}</p>
+                </div>
+            </div>
+        `;
+    }
+
+    // Show full-screen template editor if editing a template
+    if (editingTemplateFullscreen !== null) {
+        return html`
+            <${TemplateEditorScreen}
+                template=${editingTemplateFullscreen}
+onClose=${() => {
+                    setEditingTemplateFullscreen(null);
+                    setShowSettings(true);
+                }}
+                onSave=${() => {
+                    loadTemplates();
+                }}
+                onDuplicate=${(newTemplate) => {
+                    loadTemplates();
+                    setEditingTemplateFullscreen(newTemplate);
+                }}
+            />
+        `;
+    }
+
+    return html`
+        <div class="container">
+            <${Header} subtitle=${subtitle} />
+
+            <${ControlBar}
+                onCreateClick=${() => setShowCreateOptions(true)}
+                onRefreshClick=${loadAnimals}
+                onPrintMultipleClick=${() => setShowPrintMultiple(true)}
+                onDeleteMultipleClick=${() => setShowDeleteMultiple(true)}
+                onSettingsClick=${() => setShowSettings(true)}
+            />
+
+            <div id="content">
+                ${loading
+                    ? html`<div class="loading">Loading animals...</div>`
+                    : html`
+                        <${AnimalGrid}
+                            animals=${animals}
+                            rescues=${rescues}
+                            onEdit=${(id) => setEditingAnimal(animals.find(a => a.id === id))}
+                            onPrintFront=${handlePrintFront}
+                            onPrintBack=${handlePrintBack}
+                            onPrintFlyer=${handlePrintFlyer}
+                            customTemplates=${customTemplates}
+                            onPrintWithTemplate=${handlePrintWithTemplate}
+                        />
+                    `
+                }
+            </div>
+
+            <!-- Modals -->
+            <${CreateOptionsModal}
+                isOpen=${showCreateOptions}
+                onClose=${() => setShowCreateOptions(false)}
+                onSelectManual=${() => { setShowCreateOptions(false); setManualEntryData(null); setShowManualEntry(true); }}
+                onSelectScrape=${() => { setShowCreateOptions(false); setShowScrape(true); }}
+                onSelectFromSite=${() => { setShowCreateOptions(false); setShowRescueSelect(true); }}
+            />
+
+            <${RescueSelectModal}
+                isOpen=${showRescueSelect}
+                onClose=${() => setShowRescueSelect(false)}
+                onSelect=${(rescue) => { setSelectedRescue(rescue); setShowRescueSelect(false); setShowSelectFromSite(true); }}
+            />
+
+            <${ScrapeModal}
+                isOpen=${showScrape}
+                onClose=${() => setShowScrape(false)}
+                onScrape=${handleScrape}
+            />
+
+            <${ManualEntryModal}
+                isOpen=${showManualEntry}
+                onClose=${() => { setShowManualEntry(false); setManualEntryData(null); }}
+                rescues=${rescues}
+                initialData=${manualEntryData}
+                onSubmit=${loadAnimals}
+            />
+
+            <${EditAnimalModal}
+                isOpen=${!!editingAnimal}
+                onClose=${() => setEditingAnimal(null)}
+                animal=${editingAnimal}
+                rescues=${rescues}
+                onSubmit=${loadAnimals}
+                onDelete=${loadAnimals}
+            />
+
+            <${SelectFromSiteModal}
+                isOpen=${showSelectFromSite}
+                onClose=${() => setShowSelectFromSite(false)}
+                selectedRescue=${selectedRescue}
+                onImportComplete=${loadAnimals}
+            />
+
+            <${DeleteMultipleModal}
+                isOpen=${showDeleteMultiple}
+                onClose=${() => setShowDeleteMultiple(false)}
+                animals=${animals}
+                onDeleteComplete=${loadAnimals}
+            />
+
+            <${PrintMultipleModal}
+                isOpen=${showPrintMultiple}
+                onClose=${() => setShowPrintMultiple(false)}
+                animals=${animals}
+                onPrintSelected=${handlePrintMultiple}
+            />
+
+            <${SettingsModal}
+                isOpen=${showSettings}
+                onClose=${() => setShowSettings(false)}
+                printers=${printers}
+                onUpdate=${loadAnimals}
+                onEditTemplate=${(template) => setEditingTemplateFullscreen(template)}
+            />
+
+            <${PrintSettingsModal}
+                isOpen=${showPrintSettings}
+                onClose=${() => { setShowPrintSettings(false); setPrintTemplateConfig(null); if (printCallback) printCallback(false); }}
+                filePath=${printFilePath}
+                onPrintComplete=${printCallback}
+                templateConfig=${printTemplateConfig}
+            />
+        </div>
+    `;
+}
+
+// ============================================================
+// Root Component with Providers
+// ============================================================
+function Root() {
+    return html`
+        <${ToastProvider}>
+            <${App} />
+        <//>
+    `;
+}
+
+// ============================================================
+// Initialize Application
+// ============================================================
+document.addEventListener('DOMContentLoaded', () => {
+    const container = document.getElementById('app') || document.body;
+    render(html`<${Root} />`, container);
 });

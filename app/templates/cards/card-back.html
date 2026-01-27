@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Card Generator</title>
+    <style>
+body {
+    margin: 0;
+    padding: 0;
+    font-family: Arial, sans-serif;
+    font-size: 14px;
+    background-color: #000;
+    box-sizing: border-box;
+}
+
+#page {
+    display: grid;
+    grid-template-columns: repeat(5, 2in);
+    grid-template-rows: repeat(2, 3.5in);
+    gap: 0;
+    justify-content: center;
+    align-content: center;
+    align-items: center;
+    justify-items: center;
+    width: 11in;
+    height: 8.5in;
+    box-sizing: border-box;
+    background-color: #fff;
+    margin: 0 auto;
+}
+
+.business-card {
+    width: 2in!important;
+    height: 3.5in!important;
+    border: 0px solid #fff;
+    padding: 10px!important;
+    box-sizing: border-box;
+    background-color: #fff;
+    margin: 0;
+}
+
+
+.business-card-front {
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    padding-bottom: 5px;
+}
+
+.business-card-front .logo {
+    display: block;
+    margin: 0 auto;
+    position: relative;
+    top: 0;
+    max-height: 60px;
+    max-width: 80%;
+    width: auto;
+    object-fit: contain;
+    align-self: center;
+}
+
+.business-card-front span {
+    display: block;
+    text-align: center;
+    padding: 0;
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.business-card-front .name-age-row {
+    display: flex !important;
+    justify-content: center !important;
+    align-items: center;
+    gap: 15px;
+    width: 100%;
+    padding: 0;
+    margin: 0;
+    flex-grow: 0 !important;
+}
+
+.business-card-front .name-age-row .name {
+    text-align: left;
+    flex: 0 0 auto;
+    width: auto !important;
+}
+
+.business-card-front .name-age-row .age {
+    text-align: right;
+    flex: 0 0 auto;
+    width: auto !important;
+}
+
+.business-card-front .breed {
+    text-align: center;
+}
+
+.business-card-front .portrait {
+    width: 100%;
+    height: auto;
+    object-fit: contain;
+}
+
+
+.portrait {
+    width: 100%;
+    max-height: 200px;
+    object-fit: contain;
+}
+.business-card-front div:not(.name-age-row) {
+    flex-grow: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.slug{
+    display: inline-block!important;
+    word-break: break-all;
+}
+
+.business-card-back {
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    padding: 10px;
+}
+
+.business-card-back .qr-code,
+.business-card-back .description,
+.business-card-back .attributes {
+    margin: 5px 0;
+}
+
+.business-card-back .qr-code {
+    display: block;
+    margin: 0 auto;
+    padding: 0;
+}
+
+.qr-code{
+    width: 75%;
+    height: auto;
+}
+
+.business-card-back .attributes table td:nth-child(2) {
+    text-align: right;
+}
+
+.business-card-back .attributes table {
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.no-space{
+    margin: 0px!important;
+    padding: 0px!important;
+}
+
+.centered {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    text-align: center;
+}
+
+iframe {
+    padding: 0 !important;
+    margin: 0 !important;
+    overflow: hidden !important;
+    border: none !important;
+    scrollbar-width: none !important; /* Firefox */
+    -ms-overflow-style: none !important; /* IE and Edge */
+}
+
+iframe::-webkit-scrollbar {
+    display: none !important; /* Chrome, Safari, Opera */
+}
+    </style>
+</head>
+<body>
+    <div id="page" class="no-space">
+        {{#repeat 10}}
+        <div id="card-back{{@index}}" class="business-card business-card-back">
+            <span class="slug centered">{{slug}}</span>
+            <img class="qrcode" src="{{qrcode}}" alt="QR Code" style="width:60%; display: block; margin-left: auto; margin-right: auto;"/>
+            <div class="attributes">
+                <table>
+                    <tr>
+                        <td>Age:</td>
+                        <td>{{ageLong}}</td>
+                    </tr>
+                    <tr>
+                        <td>Gender:</td>
+                        <td>{{gender}}</td>
+                    </tr>
+                    <tr>
+                        <td>Size:</td>
+                        <td>{{size}}</td>
+                    </tr>
+                    <tr>
+                        <td>Shots:</td>
+                        <td>{{shots}}</td>
+                    </tr>
+                    <tr>
+                        <td>Housetrained:</td>
+                        <td>{{housetrained}}</td>
+                    </tr>
+                    <tr>
+                        <td>OK with kids:</td>
+                        <td>{{kids}}</td>
+                    </tr>
+                    <tr>
+                        <td>OK with dogs:</td>
+                        <td>{{dogs}}</td>
+                    </tr>
+                    <tr>
+                        <td>OK with cats:</td>
+                        <td>{{cats}}</td>
+                    </tr>
+                </table>
+            </div>
+        </div>
+        {{/repeat}}
+    </div>
+</body>
+
+</html>

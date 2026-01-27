@@ -4,7 +4,9 @@ This document provides context for AI agents working on the Foster Card Generato
 
 ## Purpose
 
-Desktop application (Electron) for animal rescue organizations to create printable trading cards for foster animals. Cards print on Avery 8471 business card templates (10 per sheet) at 360 DPI.
+Desktop application (Electron) for animal rescue organizations to create printable promotional materials for foster animals. Supports multiple output formats:
+- **Trading Cards** - Print on Avery 8471 business card templates (10 per sheet) at 360 DPI
+- **Adoption Flyers** - Full-page 8.5" × 11" portrait flyers with large photos and custom attributes
 
 ## Architecture
 
@@ -29,9 +31,11 @@ Main Process (main.js)          Renderer Process (app/resources/js/app.js)
 |-----------|---------|
 | `app/` | Main application code |
 | `app/resources/` | UI (HTML, CSS, JS for renderer) |
-| `app/db/` | Migrations and seeds |
-| `src/` | Card templates (Handlebars), CSS, sample data |
-| `db/` | Legacy schema (migrations now in `app/db/`) |
+| `app/db/` | Database module and migrations |
+| `app/db/migrations/` | Database migration files (timestamped) |
+| `app/templates/` | Handlebars HTML templates for output generation |
+| `app/templates/cards/` | Built-in business card templates (card-front, card-back) |
+| `docs/` | Documentation and GitHub Pages website |
 
 ## Code Boundaries
 
@@ -56,20 +60,27 @@ Renders HTML templates via Puppeteer at 360 DPI (deviceScaleFactor = 3.75). Retu
 
 ## Database Schema
 
-Four tables: `rescues`, `animals`, `print_profiles`, `schema_migrations`
+Six tables:
+- `rescues` - Rescue organizations with logos (BLOB storage)
+- `animals` - Animal records with portraits, bio text, and custom attributes (JSON)
+- `print_profiles` - Saved printer configurations with calibration data
+- `templates` - Card/flyer templates (HTML + config JSON)
+- `settings` - Key-value storage for app settings (e.g., OpenAI API key)
+- `schema_migrations` - Migration tracking
 
 Logos and portraits stored as BLOBs - eliminates file path dependencies.
 
-See [DATABASE.md](DATABASE.md) for full schema.
+See [docs/TEMPLATES.md](docs/TEMPLATES.md) for template system documentation.
 
 ## Critical Files
 
 | File | Lines | Role |
 |------|-------|------|
 | `main.js` | ~500 | Electron main process, all IPC handlers |
-| `app/db.js` | ~800 | Database abstraction layer |
-| `app/generate-card-cli.js` | ~400 | Card HTML to PNG rendering |
+| `app/db.js` | ~800 | Database abstraction layer (animals, rescues, templates, settings) |
+| `app/generate-card-cli.js` | ~500 | Template-based HTML to PNG rendering via Puppeteer |
 | `app/print-windows.js` | ~900 | Windows printing with calibration |
+| `app/resources/js/app.js` | ~3100 | Renderer UI (Preact + HTM components) |
 | `app/paths.js` | ~50 | Cross-platform path resolution |
 
 ## NixOS Integration
@@ -135,6 +146,13 @@ const result = await ipcRenderer.invoke('action-name', data);
 2. Export `up(db)` and `down(db)` functions
 3. Migrations run automatically on startup
 
+### Adding a New Template
+1. Create HTML file in `app/templates/` using Handlebars syntax
+2. Add migration to seed template into `templates` table with config JSON
+3. Template must have element with `id="page"` for screenshot capture
+4. Use `{{#repeat N}}` helper to repeat card content N times
+5. See [docs/TEMPLATES.md](docs/TEMPLATES.md) for full documentation
+
 ## Pre-Release Checklist
 
 1. Update version in `package.json`
@@ -150,7 +168,8 @@ const result = await ipcRenderer.invoke('action-name', data);
 - **Files**: kebab-case (`scrape-url-wagtopia.js`)
 - **Functions**: camelCase
 - **Database columns**: snake_case
-- **No frameworks**: Vanilla DOM manipulation in renderer
+- **UI Framework**: Preact + HTM (lightweight React-like components)
+- **Templates**: Handlebars with custom helpers (`{{#repeat}}`, `{{tilde}}`)
 
 ## External Dependencies (Windows)
 
@@ -175,8 +194,33 @@ Puppeteer checks these paths in order:
 - **External database** - Not used; sql.js is pure JavaScript SQLite
 - **GIMP** - Only used on Linux/macOS for image editing
 
+## Key Features
+
+### Template System
+- Flexible Handlebars-based templates stored in database
+- Built-in templates: `card-front`, `card-back`, `adoption-flyer`
+- Custom templates can be created via UI or database API
+- Preprocessing pipeline: QR code generation, boolean conversion, image preparation
+
+### Settings System
+- Key-value storage in `settings` table
+- OpenAI API key for AI-powered attribute generation
+- Settings modal with sub-modals for rescues, print profiles, and templates
+
+### Animal Attributes
+- `bio` field: Text description scraped from adoption profiles
+- `attributes` field: JSON array of up to 16 custom traits
+- AI-powered attribute generation from bio using OpenAI GPT-4 mini
+- Custom attributes displayed on adoption flyer template
+
+### AI Image Editing
+- Edit animal photos using OpenAI's gpt-image-1 (DALL-E 3)
+- Natural language prompts: "Make background a sunny park", "Remove the leash"
+- Interactive workflow: generate, review, continue editing, or save
+- Requires OpenAI API key configured in Settings
+
 ## Known Limitations
 
 - TypeScript config exists but code is JavaScript
 - Limited test coverage (only `test-scraper-integration.js`)
-- Calibration values are magic numbers (could be more configurable)
+- AI features require user to provide their own OpenAI API key

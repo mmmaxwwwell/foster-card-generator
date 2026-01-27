@@ -121,4 +121,50 @@ function down(db) {
     db.run('DROP TABLE IF EXISTS rescues');
 }
 
-module.exports = { up, down };
+/**
+ * Default rescue organizations
+ */
+const DEFAULT_RESCUES = [
+    {
+        id: 1,
+        name: 'Paws Rescue League',
+        website: 'pawsrescueleague.org',
+        logo_path: 'logo.png',
+        org_id: '1841035',
+        scraper_type: 'wagtopia'
+    },
+    {
+        id: 2,
+        name: 'Brass City Rescue',
+        website: 'brasscityrescuealliance.org',
+        logo_path: 'brass-city-logo.jpg',
+        org_id: '87063',
+        scraper_type: 'adoptapet'
+    }
+];
+
+/**
+ * Seed initial data
+ * @param {Object} db - sql.js database instance
+ */
+function seed(db) {
+    for (const rescue of DEFAULT_RESCUES) {
+        const stmt = db.prepare(`
+            INSERT OR IGNORE INTO rescues (id, name, website, logo_path, org_id, scraper_type)
+            VALUES (?, ?, ?, ?, ?, ?)
+        `);
+        stmt.bind([
+            rescue.id,
+            rescue.name,
+            rescue.website,
+            rescue.logo_path,
+            rescue.org_id,
+            rescue.scraper_type
+        ]);
+        stmt.step();
+        stmt.free();
+    }
+    console.log('[DB] Seeded rescues table with default organizations');
+}
+
+module.exports = { up, down, seed };

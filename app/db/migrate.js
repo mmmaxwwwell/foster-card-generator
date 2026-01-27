@@ -65,9 +65,9 @@ function getAvailableMigrations() {
  * Run pending migrations (up)
  * @param {Object} db - sql.js database instance
  * @param {Function} saveDatabase - Function to save database to disk
- * @returns {Array<string>} - Array of applied migration versions
+ * @returns {Promise<Array<string>>} - Array of applied migration versions
  */
-function runMigrations(db, saveDatabase) {
+async function runMigrations(db, saveDatabase) {
     ensureMigrationsTable(db);
 
     const applied = getAppliedMigrations(db);
@@ -88,6 +88,12 @@ function runMigrations(db, saveDatabase) {
 
             // Run the up migration
             migrationModule.up(db);
+
+            // Run seed function if defined (supports async)
+            if (typeof migrationModule.seed === 'function') {
+                console.log(`[DB] Running seed for migration: ${migration.version}`);
+                await migrationModule.seed(db);
+            }
 
             // Record the migration
             const stmt = db.prepare(
@@ -268,7 +274,20 @@ function down(db) {
     // db.run('DROP TABLE IF EXISTS example');
 }
 
-module.exports = { up, down };
+/**
+ * Seed data after migration (optional)
+ * @param {Object} db - sql.js database instance
+ */
+function seed(db) {
+    // TODO: Add seed data here (optional)
+    // Example:
+    // const stmt = db.prepare('INSERT INTO example (name) VALUES (?)');
+    // stmt.bind(['Default']);
+    // stmt.step();
+    // stmt.free();
+}
+
+module.exports = { up, down, seed };
 `;
 
     fs.writeFileSync(filepath, template);

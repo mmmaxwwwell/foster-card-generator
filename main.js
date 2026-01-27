@@ -33,12 +33,19 @@ function createWindow() {
         height: 700,
         minWidth: 600,
         minHeight: 400,
+        show: false,
         title: 'Foster Animals',
         icon: path.join(__dirname, 'src', 'logo.png'),
         webPreferences: {
             nodeIntegration: true,
             contextIsolation: false
         }
+    });
+
+    // Maximize and show when ready
+    mainWindow.once('ready-to-show', () => {
+        mainWindow.maximize();
+        mainWindow.show();
     });
 
     // Load the app's index.html
@@ -383,7 +390,10 @@ ipcMain.handle('print-image', async (event, filePath, options = {}) => {
                 paperSource: options.paperSource || 'default',
                 cleanup: true,
                 calibration: calibration,
-                borderCalibration: borderCalibration
+                borderCalibration: borderCalibration,
+                // Pass template page dimensions for correct sizing
+                pageWidthInches: options.pageWidthInches,
+                pageHeightInches: options.pageHeightInches
             });
             return result;
         } catch (err) {

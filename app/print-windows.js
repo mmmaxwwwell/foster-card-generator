@@ -8,13 +8,11 @@ const sharp = require('sharp');
 // The test page has 4 dots arranged in a square, 100mm apart (expected distance)
 const CALIBRATION_EXPECTED_DISTANCE_MM = 100;
 
-// Page dimensions in pixels at 360 DPI (our standard print DPI)
-// US Letter: 11" x 8.5" landscape
-const PAGE_WIDTH_INCHES = 11;
-const PAGE_HEIGHT_INCHES = 8.5;
+// Default print DPI
 const PRINT_DPI = 360;
-const PAGE_WIDTH_PX = Math.round(PAGE_WIDTH_INCHES * PRINT_DPI);  // 3960 pixels
-const PAGE_HEIGHT_PX = Math.round(PAGE_HEIGHT_INCHES * PRINT_DPI); // 3060 pixels
+// Default page dimensions (US Letter landscape) - used for calibration page
+const PAGE_WIDTH_PX = Math.round(11 * PRINT_DPI);  // 3960 pixels (landscape width)
+const PAGE_HEIGHT_PX = Math.round(8.5 * PRINT_DPI); // 3060 pixels (landscape height)
 
 // Conversion constants
 const MM_PER_INCH = 25.4;
@@ -103,11 +101,30 @@ function getCalibrationFromProfile(profile) {
  * @param {object} options - Processing options
  * @param {object} options.calibration - { ab, bc, cd, da } raw measurements or { scaleX, scaleY }
  * @param {object} options.borderCalibration - { top, right, bottom, left } in mm
+ * @param {number} options.pageWidthInches - Page width in inches (from template config)
+ * @param {number} options.pageHeightInches - Page height in inches (from template config)
  * @returns {Promise<string>} - Path to the processed PNG
  */
 async function applyCalibrationToPng(inputPath, outputPath, options = {}) {
     console.log('[PrintWindows] Processing PNG with calibration:', inputPath);
     console.log('[PrintWindows] Output:', outputPath);
+
+    // Determine page dimensions from options or source image
+    // The template config should specify the page size
+    let targetPageWidthPx, targetPageHeightPx;
+    if (options.pageWidthInches && options.pageHeightInches) {
+        targetPageWidthPx = Math.round(options.pageWidthInches * PRINT_DPI);
+        targetPageHeightPx = Math.round(options.pageHeightInches * PRINT_DPI);
+        console.log(`[PrintWindows] Using template page size: ${options.pageWidthInches}" x ${options.pageHeightInches}"`);
+    } else {
+        // Fall back to reading the source image dimensions
+        // The source image is already generated at the correct size by generate-card-cli.js
+        const sourceMetadata = await sharp(inputPath).metadata();
+        targetPageWidthPx = sourceMetadata.width;
+        targetPageHeightPx = sourceMetadata.height;
+        console.log('[PrintWindows] Using source image dimensions as page size');
+    }
+    console.log(`[PrintWindows] Target page size: ${targetPageWidthPx} x ${targetPageHeightPx} px`);
 
     // Get calibration scale factors
     let calibrationScaleX = 1;
@@ -168,8 +185,6 @@ async function applyCalibrationToPng(inputPath, outputPath, options = {}) {
                     ', bottom=', borderBottomPx, ', left=', borderLeftPx);
     }
 
-    console.log('[PrintWindows] Page size:', PAGE_WIDTH_PX, 'x', PAGE_HEIGHT_PX, 'px');
-
     // Read the source image
     const sourceImage = sharp(inputPath);
     const metadata = await sourceImage.metadata();
@@ -180,13 +195,13 @@ async function applyCalibrationToPng(inputPath, outputPath, options = {}) {
     // - This means the printer shrinks by ~2%
     // - To compensate, we make our image larger by ~2% so when printer shrinks it, output is correct
     //
-    // The source image is designed to fill an 11x8.5" area at 360 DPI.
+    // The source image is designed to fill the page area at the specified DPI.
     // We apply calibration scaling to pre-compensate for printer distortion.
     // Border calibration only affects POSITION, not size.
 
     // Calculate scale to fit source image to page while maintaining aspect ratio
-    const fitScaleX = PAGE_WIDTH_PX / metadata.width;
-    const fitScaleY = PAGE_HEIGHT_PX / metadata.height;
+    const fitScaleX = targetPageWidthPx / metadata.width;
+    const fitScaleY = targetPageHeightPx / metadata.height;
     const fitScale = Math.min(fitScaleX, fitScaleY);
 
     // Apply calibration scaling on top of fit scaling
@@ -199,8 +214,8 @@ async function applyCalibrationToPng(inputPath, outputPath, options = {}) {
 
     // Ensure the scaled image doesn't exceed page dimensions
     // (this could happen with extreme calibration values)
-    const finalWidth = Math.min(scaledWidth, PAGE_WIDTH_PX);
-    const finalHeight = Math.min(scaledHeight, PAGE_HEIGHT_PX);
+    const finalWidth = Math.min(scaledWidth, targetPageWidthPx);
+    const finalHeight = Math.min(scaledHeight, targetPageHeightPx);
 
     if (finalWidth !== scaledWidth || finalHeight !== scaledHeight) {
         console.log('[PrintWindows] Clamped to page size:', finalWidth, 'x', finalHeight, 'px');
@@ -288,7 +303,7 @@ async function printPng(filePath, options = {}) {
 
     if (options.showDialog !== false) {
         // Show Windows print dialog
-        return printWithDialog(filePath, printerName);
+        return printWithDialog(filePath, printerName, landscape);
     }
 
     // Silent printing using PowerShell
@@ -439,9 +454,10 @@ try {
  * Print with Windows print dialog
  * @param {string} filePath - Path to the image file
  * @param {string} printerName - Optional printer name to pre-select
+ * @param {boolean} landscape - Whether to print in landscape orientation
  * @returns {Promise<{success: boolean, error?: string}>}
  */
-function printWithDialog(filePath, printerName = '') {
+function printWithDialog(filePath, printerName = '', landscape = true) {
     return new Promise((resolve) => {
         // Use Windows print dialog with 1:1 scale printing
         const psScript = `
@@ -458,7 +474,7 @@ try {
     ${printerName ? `$printDoc.PrinterSettings.PrinterName = "${printerName.replace(/"/g, '\\"')}"` : ''}
 
     # Set page settings for borderless/minimal margin printing
-    $printDoc.DefaultPageSettings.Landscape = $true
+    $printDoc.DefaultPageSettings.Landscape = $${landscape}
     $printDoc.DefaultPageSettings.Margins = New-Object System.Drawing.Printing.Margins(0, 0, 0, 0)
 
     $printDialog.Document = $printDoc
@@ -603,9 +619,12 @@ async function printImage(imagePath, options = {}) {
         const processedPath = path.join(tmpDir, `${imageName}-calibrated-${Date.now()}.png`);
 
         // Apply calibration to create processed PNG
+        // Pass through page dimensions from template config if provided
         await applyCalibrationToPng(imagePath, processedPath, {
             calibration: options.calibration,
-            borderCalibration: options.borderCalibration
+            borderCalibration: options.borderCalibration,
+            pageWidthInches: options.pageWidthInches,
+            pageHeightInches: options.pageHeightInches
         });
 
         // Print the processed PNG
