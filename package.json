@@ -34,7 +34,7 @@
   "devDependencies": {
     "@types/node": "^22.13.0",
     "electron": "^33.0.0",
-    "electron-builder": "^25.0.0"
+    "electron-builder": "^26.6.0"
   },
   "build": {
     "appId": "com.foster-card-generator.app",
