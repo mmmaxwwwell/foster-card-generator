@@ -8,8 +8,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const https = require('https');
-const http = require('http');
+const { seedRescues } = require('../seeds.js');
 
 // Path to template files
 const TEMPLATES_DIR = path.join(__dirname, '..', '..', 'templates', 'cards');
@@ -27,51 +26,6 @@ function readTemplateFile(filename) {
         console.error(`[Migration] Failed to read template file ${filename}:`, err.message);
         return null;
     }
-}
-
-/**
- * Download an image from a URL and return as Buffer
- * @param {string} url - URL to download from
- * @returns {Promise<Buffer>} - Image data as buffer
- */
-function downloadImage(url) {
-    return new Promise((resolve, reject) => {
-        const protocol = url.startsWith('https') ? https : http;
-        const urlObj = new URL(url);
-
-        const options = {
-            hostname: urlObj.hostname,
-            path: urlObj.pathname + urlObj.search,
-            headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-                'Accept': 'image/webp,image/apng,image/*,*/*;q=0.8'
-            }
-        };
-
-        const request = protocol.get(options, (response) => {
-            // Handle redirects
-            if (response.statusCode >= 300 && response.statusCode < 400 && response.headers.location) {
-                downloadImage(response.headers.location).then(resolve).catch(reject);
-                return;
-            }
-
-            if (response.statusCode !== 200) {
-                reject(new Error(`Failed to download image: ${response.statusCode}`));
-                return;
-            }
-
-            const chunks = [];
-            response.on('data', (chunk) => chunks.push(chunk));
-            response.on('end', () => resolve(Buffer.concat(chunks)));
-            response.on('error', reject);
-        });
-
-        request.on('error', reject);
-        request.setTimeout(30000, () => {
-            request.destroy();
-            reject(new Error('Download timeout'));
-        });
-    });
 }
 
 /**
@@ -255,32 +209,6 @@ function down(db) {
     db.run('DROP TABLE IF EXISTS rescues');
 }
 
-/**
- * Default rescue organizations
- */
-const DEFAULT_RESCUES = [
-    {
-        id: 1,
-        name: 'Paws Rescue League',
-        website: 'pawsrescueleague.org',
-        logo_path: 'logo.png',
-        logo_url: 'https://www.pawsrescueleague.org/uploads/1/3/6/2/136274550/prl-logo-white-background_orig.png',
-        logo_mime: 'image/png',
-        org_id: '1841035',
-        scraper_type: 'wagtopia'
-    },
-    {
-        id: 2,
-        name: 'Brass City Rescue',
-        website: 'brasscityrescuealliance.org',
-        logo_path: 'brass-city-logo.jpg',
-        logo_url: null,
-        logo_mime: 'image/jpeg',
-        org_id: '87063',
-        scraper_type: 'adoptapet'
-    }
-];
-
 // Template configurations
 const DEFAULT_CARD_CONFIG = {
     pageWidthInches: 11,
@@ -333,41 +261,8 @@ const ADOPTION_FLYER_CONFIG = {
  * @param {Object} db - sql.js database instance
  */
 async function seed(db) {
-    // ========================================
-    // Seed rescues
-    // ========================================
-    for (const rescue of DEFAULT_RESCUES) {
-        let logoData = null;
-
-        // Try to download the logo
-        if (rescue.logo_url) {
-            try {
-                console.log(`[DB] Downloading logo for ${rescue.name}...`);
-                logoData = await downloadImage(rescue.logo_url);
-                console.log(`[DB] Downloaded logo for ${rescue.name} (${logoData.length} bytes)`);
-            } catch (err) {
-                console.warn(`[DB] Failed to download logo for ${rescue.name}: ${err.message}`);
-            }
-        }
-
-        const stmt = db.prepare(`
-            INSERT OR IGNORE INTO rescues (id, name, website, logo_path, logo_data, logo_mime, org_id, scraper_type)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        `);
-        stmt.bind([
-            rescue.id,
-            rescue.name,
-            rescue.website,
-            rescue.logo_path,
-            logoData,
-            rescue.logo_mime,
-            rescue.org_id,
-            rescue.scraper_type
-        ]);
-        stmt.step();
-        stmt.free();
-    }
-    console.log('[DB] Seeded rescues table with default organizations');
+    // Seed rescues (including logo download) via the shared helper in seeds.js.
+    await seedRescues(db);
 
     // ========================================
     // Seed templates

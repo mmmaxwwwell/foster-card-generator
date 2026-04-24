@@ -14,7 +14,8 @@
     "build:win": "electron-builder --win --x64 --publish never",
     "postinstall": "electron-builder install-app-deps",
     "test:scraper": "node test-scraper-integration.js",
-    "test:scraper:local": "USE_LOCAL_FILE=true node test-scraper-integration.js"
+    "test:scraper:local": "USE_LOCAL_FILE=true node test-scraper-integration.js",
+    "test:scrape-adoptapet": "node test/scrape-url-adoptapet.test.js"
   },
   "license": "MIT",
   "description": "Desktop app for creating printable foster animal business cards and flyers",

@@ -172,6 +172,63 @@ ipcMain.handle('open-in-gimp', async (event, filePath) => {
     }
 });
 
+// IPC handler for opening multiple files sequentially in GIMP (Linux only).
+// Launches GIMP empty, waits 5s for it to initialize, then opens all files
+// in one invocation so they appear as tabs in the given order.
+ipcMain.handle('open-multiple-in-gimp', async (event, filePaths) => {
+    if (process.platform === 'win32') {
+        return { success: false, error: 'open-multiple-in-gimp is Linux/macOS only' };
+    }
+    if (!Array.isArray(filePaths) || filePaths.length === 0) {
+        return { success: false, error: 'No files provided' };
+    }
+
+    const env = { ...process.env };
+    delete env.LD_LIBRARY_PATH;
+
+    console.log('[Main] Launching empty GIMP, then will open', filePaths.length, 'files');
+
+    try {
+        await new Promise((resolve, reject) => {
+            const child = exec('gimp', { env }, (err, stdout, stderr) => {
+                if (err) console.error('[Main] GIMP exec error:', err.message);
+                if (stderr) console.error('[Main] GIMP stderr:', stderr);
+            });
+            setTimeout(() => {
+                if (child.pid) {
+                    console.log('[Main] GIMP launched with PID:', child.pid);
+                    resolve();
+                } else {
+                    reject(new Error('Failed to start GIMP process'));
+                }
+            }, 500);
+        });
+    } catch (err) {
+        return { success: false, error: err.message };
+    }
+
+    // Wait 5s for GIMP to fully open before sending files.
+    await new Promise(resolve => setTimeout(resolve, 5000));
+
+    const quoted = filePaths.map(p => `"${p.replace(/"/g, '\\"')}"`).join(' ');
+    const fullCommand = `gimp ${quoted}`;
+    console.log('[Main] Opening files in GIMP:', fullCommand);
+
+    return new Promise((resolve) => {
+        const child = exec(fullCommand, { env }, (err, stdout, stderr) => {
+            if (err) console.error('[Main] GIMP open-files exec error:', err.message);
+            if (stderr) console.error('[Main] GIMP open-files stderr:', stderr);
+        });
+        setTimeout(() => {
+            if (child.pid) {
+                resolve({ success: true });
+            } else {
+                resolve({ success: false, error: 'Failed to hand files to GIMP' });
+            }
+        }, 500);
+    });
+});
+
 // IPC handler for getting list of printers
 ipcMain.handle('get-printers', async (event) => {
     try {
@@ -317,13 +374,19 @@ ipcMain.handle('delete-database-and-reload', async () => {
         // Close the database connection
         db.close();
 
-        // Delete the database file
-        if (dbPath && fs.existsSync(dbPath)) {
-            fs.unlinkSync(dbPath);
+        // Delete the database file and any sql.js WAL/SHM sidecars
+        if (dbPath) {
+            for (const suffix of ['', '-wal', '-shm', '-journal']) {
+                const p = dbPath + suffix;
+                if (fs.existsSync(p)) fs.unlinkSync(p);
+            }
             console.log('[Main] Database deleted successfully');
         }
 
-        // Reload the app
+        // Re-initialize (re-runs migrations + seeds on a fresh file)
+        await db.initializeAsync();
+
+        // Reload the renderer so it picks up the fresh schema
         if (mainWindow) {
             mainWindow.reload();
         }

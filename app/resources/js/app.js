@@ -1839,9 +1839,126 @@ function DeleteMultipleModal({ isOpen, onClose, animals, onDeleteComplete }) {
 }
 
 // ============================================================
+// Print Multiple Modal
+// ============================================================
+function PrintMultipleModal({ isOpen, onClose, animals, onGenerateCards }) {
+    const [selectedIds, setSelectedIds] = useState(new Set());
+    const [orderedIds, setOrderedIds] = useState([]);
+    const [busy, setBusy] = useState(false);
+    const showToast = useToast();
+
+    useEffect(() => {
+        if (!isOpen) {
+            setSelectedIds(new Set());
+            setOrderedIds([]);
+        }
+    }, [isOpen]);
+
+    const toggleSelection = (id) => {
+        setSelectedIds(prev => {
+            const next = new Set(prev);
+            if (next.has(id)) next.delete(id);
+            else next.add(id);
+            return next;
+        });
+        setOrderedIds(prev => {
+            if (prev.includes(id)) return prev.filter(x => x !== id);
+            return [...prev, id];
+        });
+    };
+
+    const toggleSelectAll = () => {
+        if (selectedIds.size === animals.length) {
+            setSelectedIds(new Set());
+            setOrderedIds([]);
+        } else {
+            setSelectedIds(new Set(animals.map(a => a.id)));
+            setOrderedIds(animals.map(a => a.id));
+        }
+    };
+
+    const handlePrint = async () => {
+        if (orderedIds.length === 0) {
+            showToast('Please select at least one animal', 'error');
+            return;
+        }
+        setBusy(true);
+        try {
+            const ordered = orderedIds
+                .map(id => animals.find(a => a.id === id))
+                .filter(Boolean);
+            await onGenerateCards(ordered);
+            onClose();
+        } catch (err) {
+            showToast(`Error: ${err.message}`, 'error');
+        } finally {
+            setBusy(false);
+        }
+    };
+
+    const footer = html`
+        <button class="btn btn-secondary" onClick=${onClose} disabled=${busy}>Cancel</button>
+        <button class="btn" onClick=${handlePrint} disabled=${busy || orderedIds.length === 0}>
+            ${busy ? 'Generating...' : `Print Selected (${orderedIds.length})`}
+        </button>
+    `;
+
+    return html`
+        <${Modal} isOpen=${isOpen} onClose=${onClose} title="Print Multiple Animals" footer=${footer}>
+            <div class="select-all-container">
+                <label>
+                    <input
+                        type="checkbox"
+                        checked=${selectedIds.size === animals.length && animals.length > 0}
+                        onChange=${toggleSelectAll}
+                    />
+                    Select All
+                </label>
+            </div>
+            <div class="delete-animal-grid">
+                ${animals.map(animal => {
+                    const order = orderedIds.indexOf(animal.id);
+                    return html`
+                        <div
+                            key=${animal.id}
+                            class="delete-animal-item ${selectedIds.has(animal.id) ? 'selected' : ''}"
+                            onClick=${() => toggleSelection(animal.id)}
+                        >
+                            <input
+                                type="checkbox"
+                                checked=${selectedIds.has(animal.id)}
+                                onClick=${(e) => e.stopPropagation()}
+                                onChange=${() => toggleSelection(animal.id)}
+                            />
+                            ${animal.imageDataUrl
+                                ? html`<img class="delete-animal-thumbnail" src=${animal.imageDataUrl} alt=${animal.name} />`
+                                : html`<div class="delete-animal-no-image">🐕</div>`
+                            }
+                            <div class="delete-animal-name">
+                                ${order >= 0 ? `${order + 1}. ` : ''}${animal.name}
+                            </div>
+                        </div>
+                    `;
+                })}
+            </div>
+        <//>
+    `;
+}
+
+// ============================================================
 // Print Settings Modal
 // ============================================================
-function PrintSettingsModal({ isOpen, onClose, filePath, onPrintComplete, templateConfig }) {
+function PrintSettingsModal({ isOpen, onClose, filePath, onPrintComplete, templateConfig, queue }) {
+    // Queue mode: when `queue` is provided, render progress header + Back/Next nav.
+    // filePath/templateConfig then come from the current queue item.
+    const inQueueMode = !!queue;
+    const queueItem = inQueueMode ? queue.items[queue.currentIndex] : null;
+    const effectiveFilePath = inQueueMode ? queueItem?.filePath : filePath;
+    const effectiveTemplateConfig = inQueueMode ? queueItem?.templateConfig : templateConfig;
+    const modalTitle = inQueueMode
+        ? `Print — ${queueItem?.label || ''} (${queue.currentIndex + 1} of ${queue.items.length})`
+        : 'Print Settings';
+
     const [printers, setPrinters] = useState([]);
     const [profiles, setProfiles] = useState([]);
     const [selectedPrinter, setSelectedPrinter] = useState('');
@@ -1857,17 +1974,17 @@ function PrintSettingsModal({ isOpen, onClose, filePath, onPrintComplete, templa
     const showToast = useToast();
 
     // Template-driven settings (locked when template provides them)
-    const templatePaperSize = templateConfig?.paperSize || null;
-    const templateOrientation = templateConfig?.orientation || null;
+    const templatePaperSize = effectiveTemplateConfig?.paperSize || null;
+    const templateOrientation = effectiveTemplateConfig?.orientation || null;
     const isTemplateLocked = !!(templatePaperSize || templateOrientation);
 
-    // Apply template settings when modal opens
+    // Apply template settings when modal opens or queue item changes
     useEffect(() => {
-        if (isOpen && templateConfig) {
-            if (templateConfig.paperSize) setPaperSize(templateConfig.paperSize);
-            if (templateConfig.orientation) setOrientation(templateConfig.orientation);
+        if (isOpen && effectiveTemplateConfig) {
+            if (effectiveTemplateConfig.paperSize) setPaperSize(effectiveTemplateConfig.paperSize);
+            if (effectiveTemplateConfig.orientation) setOrientation(effectiveTemplateConfig.orientation);
         }
-    }, [isOpen, templateConfig]);
+    }, [isOpen, effectiveTemplateConfig]);
 
     // Function to load printers (used on open and refresh)
     const loadPrinters = async (selectDefault = true) => {
@@ -1958,15 +2075,17 @@ function PrintSettingsModal({ isOpen, onClose, filePath, onPrintComplete, templa
                 border_bottom: profile?.border_bottom || null,
                 border_left: profile?.border_left || null,
                 // Pass template page dimensions for correct sizing
-                pageWidthInches: templateConfig?.pageWidthInches,
-                pageHeightInches: templateConfig?.pageHeightInches
+                pageWidthInches: effectiveTemplateConfig?.pageWidthInches,
+                pageHeightInches: effectiveTemplateConfig?.pageHeightInches
             };
 
-            const result = await ipcRenderer.invoke('print-image', filePath, printOptions);
+            const result = await ipcRenderer.invoke('print-image', effectiveFilePath, printOptions);
             if (result.success) {
                 showToast('Sent to printer!', 'success');
-                onClose();
-                if (onPrintComplete) onPrintComplete(true);
+                if (!inQueueMode) {
+                    onClose();
+                    if (onPrintComplete) onPrintComplete(true);
+                }
             } else {
                 showToast(`Print error: ${result.error}`, 'error');
             }
@@ -1977,15 +2096,40 @@ function PrintSettingsModal({ isOpen, onClose, filePath, onPrintComplete, templa
         }
     };
 
-    const footer = html`
-        <button class="btn btn-secondary" onClick=${onClose}>Cancel</button>
-        <button class="btn btn-primary" onClick=${handlePrint} disabled=${printing || !selectedPrinter}>
-            ${printing ? 'Printing...' : 'Print'}
-        </button>
-    `;
+    const footer = inQueueMode
+        ? html`
+            <button
+                class="btn btn-secondary"
+                onClick=${() => queue.onPrev()}
+                disabled=${printing || queue.currentIndex === 0}
+            >
+                ← Back
+            </button>
+            <button
+                class="btn btn-primary"
+                onClick=${handlePrint}
+                disabled=${printing || !selectedPrinter}
+            >
+                ${printing ? 'Printing...' : 'Print'}
+            </button>
+            <button
+                class="btn btn-secondary"
+                onClick=${() => queue.onNext()}
+                disabled=${printing || queue.currentIndex >= queue.items.length - 1}
+            >
+                Next →
+            </button>
+            <button class="btn btn-secondary" onClick=${onClose} disabled=${printing}>Close</button>
+        `
+        : html`
+            <button class="btn btn-secondary" onClick=${onClose}>Cancel</button>
+            <button class="btn btn-primary" onClick=${handlePrint} disabled=${printing || !selectedPrinter}>
+                ${printing ? 'Printing...' : 'Print'}
+            </button>
+        `;
 
     return html`
-        <${Modal} isOpen=${isOpen} onClose=${onClose} title="Print Settings" footer=${footer} width="850px">
+        <${Modal} isOpen=${isOpen} onClose=${onClose} title=${modalTitle} footer=${footer} width="850px">
             <div class="modal-two-column">
                 <div class="modal-column-left">
                     <div class="printer-row">
@@ -2138,7 +2282,7 @@ function PrintSettingsModal({ isOpen, onClose, filePath, onPrintComplete, templa
                     <div class="print-preview-container">
                         <img
                             class="print-preview-image"
-                            src=${filePath ? `file:///${filePath.replace(/\\/g, '/')}?t=${Date.now()}` : ''}
+                            src=${effectiveFilePath ? `file:///${effectiveFilePath.replace(/\\/g, '/')}?t=${Date.now()}` : ''}
                             alt="Print preview"
                         />
                     </div>
@@ -3096,6 +3240,21 @@ function SettingsModal({ isOpen, onClose, printers, onUpdate, onEditTemplate }) 
                         </div>
                     </div>
                 </div>
+
+                <div class="settings-list-item" onClick=${async () => {
+                    if (!confirm('Delete the local database and start fresh? All saved animals, print profiles, and custom templates will be lost.')) return;
+                    const result = await ipcRenderer.invoke('delete-database-and-reload');
+                    if (!result.success) showToast(`Failed to reset database: ${result.error}`, 'error');
+                }}>
+                    <div class="settings-list-item-header">
+                        <span class="settings-list-item-icon">⚠️</span>
+                        <span class="settings-list-item-text">
+                            <strong>Reset Database</strong>
+                            <small>Delete and recreate the local database (destructive)</small>
+                        </span>
+                        <span class="settings-list-item-arrow">›</span>
+                    </div>
+                </div>
             </div>
 
             <!-- Nested Modals for management screens -->
@@ -3811,6 +3970,7 @@ function ControlBar({
     onCreateClick,
     onRefreshClick,
     onDeleteMultipleClick,
+    onPrintMultipleClick,
     onSettingsClick
 }) {
     return html`
@@ -3818,6 +3978,7 @@ function ControlBar({
             <button onClick=${onCreateClick}>Create Animal</button>
             <button onClick=${onRefreshClick}>Refresh</button>
             <button class="btn-danger-outline" onClick=${onDeleteMultipleClick}>Delete Multiple</button>
+            <button onClick=${onPrintMultipleClick}>Print Multiple</button>
             <button class="btn-settings" onClick=${onSettingsClick}>Settings</button>
         </div>
     `;
@@ -3873,6 +4034,7 @@ function App() {
     const [showManualEntry, setShowManualEntry] = useState(false);
     const [showSelectFromSite, setShowSelectFromSite] = useState(false);
     const [showDeleteMultiple, setShowDeleteMultiple] = useState(false);
+    const [showPrintMultiple, setShowPrintMultiple] = useState(false);
     const [showSettings, setShowSettings] = useState(false);
     const [editingTemplateFullscreen, setEditingTemplateFullscreen] = useState(null);
     const [showPrintSettings, setShowPrintSettings] = useState(false);
@@ -3884,6 +4046,8 @@ function App() {
     const [printFilePath, setPrintFilePath] = useState(null);
     const [printCallback, setPrintCallback] = useState(null);
     const [printTemplateConfig, setPrintTemplateConfig] = useState(null);
+    const [printQueue, setPrintQueue] = useState(null); // { items: [{filePath, templateConfig, label}] } | null
+    const [printQueueIndex, setPrintQueueIndex] = useState(0);
 
     // Print queue
     const [cardQueue, setCardQueue] = useState([]);
@@ -4053,6 +4217,76 @@ function App() {
             if (!result.success) {
                 showToast('Could not launch GIMP. Is it installed?', 'error');
             }
+        }
+    };
+
+    const generateCardsForAnimal = async (animal) => {
+        const rescue = db.getRescueById(animal.rescue_id || 1);
+        const portraitDataUrl = db.getImageAsDataUrl(animal.id);
+        const logoDataUrl = rescue ? db.getRescueLogoAsDataUrl(rescue.id) : null;
+
+        const params = {
+            name: animal.name,
+            breed: animal.breed,
+            ageShort: animal.age_short,
+            ageLong: animal.age_long,
+            size: animal.size,
+            gender: animal.gender,
+            shots: animal.shots,
+            housetrained: animal.housetrained,
+            kids: animal.kids,
+            dogs: animal.dogs,
+            cats: animal.cats,
+            slug: animal.slug,
+            portrait: portraitDataUrl || '',
+            rescueName: rescue?.name || 'Paws Rescue League',
+            rescueWebsite: rescue?.website || 'pawsrescueleague.org',
+            logo: logoDataUrl || ''
+        };
+
+        const frontPath = await generateCardFront(params);
+        const backPath = await generateCardBack(params);
+        return [frontPath, backPath];
+    };
+
+    const loadTemplateConfig = (side) => {
+        const templateName = side === 'front' ? 'card-front' : 'card-back';
+        try {
+            const template = db.getTemplateByName(templateName);
+            return template?.config || null;
+        } catch (err) {
+            console.log('[App] Could not load template config:', err.message);
+            return null;
+        }
+    };
+
+    const handlePrintMultiple = async (orderedAnimals) => {
+        if (process.platform === 'win32') {
+            const items = [];
+            for (const animal of orderedAnimals) {
+                showToast(`Generating cards for ${animal.name}...`);
+                const [frontPath, backPath] = await generateCardsForAnimal(animal);
+                items.push({ filePath: frontPath, templateConfig: loadTemplateConfig('front'), label: `front of ${animal.name}` });
+                items.push({ filePath: backPath, templateConfig: loadTemplateConfig('back'), label: `back of ${animal.name}` });
+            }
+            setPrintQueue({ items });
+            setPrintQueueIndex(0);
+            setShowPrintSettings(true);
+            return;
+        }
+
+        const allPaths = [];
+        for (const animal of orderedAnimals) {
+            showToast(`Generating cards for ${animal.name}...`);
+            const paths = await generateCardsForAnimal(animal);
+            allPaths.push(...paths);
+        }
+        showToast('Launching GIMP...');
+        const result = await ipcRenderer.invoke('open-multiple-in-gimp', allPaths);
+        if (!result.success) {
+            showToast(`Could not open GIMP: ${result.error}`, 'error');
+        } else {
+            showToast(`Opened ${allPaths.length} cards in GIMP`, 'success');
         }
     };
 
@@ -4337,12 +4571,20 @@ function App() {
     };
 
     if (error) {
+        const handleResetDb = async () => {
+            if (!confirm('Delete the local database and start fresh? All saved animals, print profiles, and custom templates will be lost.')) return;
+            const result = await ipcRenderer.invoke('delete-database-and-reload');
+            if (!result.success) alert(`Failed to reset database: ${result.error}`);
+        };
         return html`
             <div class="container">
                 <${Header} subtitle="Error" />
                 <div class="error">
                     <h3>Error</h3>
                     <p>${error}</p>
+                    <div style="margin-top: 16px;">
+                        <button class="btn btn-danger" onClick=${handleResetDb}>Reset Database</button>
+                    </div>
                 </div>
             </div>
         `;
@@ -4376,6 +4618,7 @@ onClose=${() => {
                 onCreateClick=${() => setShowCreateOptions(true)}
                 onRefreshClick=${loadAnimals}
                 onDeleteMultipleClick=${() => setShowDeleteMultiple(true)}
+                onPrintMultipleClick=${() => setShowPrintMultiple(true)}
                 onSettingsClick=${() => setShowSettings(true)}
             />
 
@@ -4449,6 +4692,13 @@ onClose=${() => {
                 onDeleteComplete=${loadAnimals}
             />
 
+            <${PrintMultipleModal}
+                isOpen=${showPrintMultiple}
+                onClose=${() => setShowPrintMultiple(false)}
+                animals=${animals}
+                onGenerateCards=${handlePrintMultiple}
+            />
+
             <${SettingsModal}
                 isOpen=${showSettings}
                 onClose=${() => setShowSettings(false)}
@@ -4459,10 +4709,22 @@ onClose=${() => {
 
             <${PrintSettingsModal}
                 isOpen=${showPrintSettings}
-                onClose=${() => { setShowPrintSettings(false); setPrintTemplateConfig(null); if (printCallback) printCallback(false); }}
+                onClose=${() => {
+                    setShowPrintSettings(false);
+                    setPrintTemplateConfig(null);
+                    setPrintQueue(null);
+                    setPrintQueueIndex(0);
+                    if (printCallback) printCallback(false);
+                }}
                 filePath=${printFilePath}
                 onPrintComplete=${printCallback}
                 templateConfig=${printTemplateConfig}
+                queue=${printQueue ? {
+                    items: printQueue.items,
+                    currentIndex: printQueueIndex,
+                    onPrev: () => setPrintQueueIndex(i => Math.max(0, i - 1)),
+                    onNext: () => setPrintQueueIndex(i => Math.min(printQueue.items.length - 1, i + 1))
+                } : null}
             />
         </div>
     `;
