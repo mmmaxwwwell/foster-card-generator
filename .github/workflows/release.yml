@@ -47,6 +47,35 @@ jobs:
             dist/*.msi
           if-no-files-found: error
 
+  e2e-linux:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install system deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb libfuse2
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build unpacked Linux app
+        run: npm run build:linux -- --dir
+
+      - name: Run E2E tests
+        run: |
+          xvfb-run -a --server-args="-screen 0 1280x720x24" \
+            npm run test:e2e
+
   build-linux:
     runs-on: ubuntu-latest
 
