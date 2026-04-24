@@ -9,3 +9,5 @@ result
 .env
 dist/
 examples/
+.agent-work/
+app/resources/vendor/

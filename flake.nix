@@ -30,7 +30,7 @@
           version = "1.0.0";
           src = ./.;
 
-          npmDepsHash = "sha256-60Jo3hZwCvlbyBVJB8AnLaDJXfzAofGAnD6qSreKpRs=";
+          npmDepsHash = "sha256-2zmJq/ETrELcZFcynQZuRGr00IsgSpEicW8imPC7j5E=";
 
           npmFlags = [ "--ignore-scripts" ];
           dontNpmBuild = true;
@@ -47,6 +47,10 @@
             mkdir -p $out/bin
             mkdir -p $out/share/applications
             mkdir -p $out/share/icons/hicolor/256x256/apps
+
+            # Populate app/resources/vendor/ from node_modules (npmFlags includes
+            # --ignore-scripts, so our postinstall hook does not run here).
+            node scripts/vendor-assets.js
 
             cp -r app src db package.json main.js $out/lib/foster-card-generator/
             cp -r node_modules $out/lib/foster-card-generator/

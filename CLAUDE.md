@@ -13,6 +13,6 @@ See [AGENTS.md](AGENTS.md) for comprehensive documentation about this codebase.
 ## Before Releases
 
 1. Update npm packages if needed
-2. If package.json changed, regenerate node2nix: `node2nix -l package-lock.json -c node-packages.nix`
+2. If package-lock.json changed, refresh the Nix npm deps hash: `./scripts/update-npm-hash.sh`
 3. Review [AGENTS.md](AGENTS.md) for accuracy
 4. Build and test

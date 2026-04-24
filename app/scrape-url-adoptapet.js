@@ -4,6 +4,20 @@ const path = require('path');
 
 const TMP_DIR = getTmpDir();
 
+// Test-harness opt-in: route native fetch() through the fixture proxy.
+// Production paths never set this env var. Configured once at module load.
+if (process.env.E2E_PROXY_SERVER) {
+    try {
+        const { setGlobalDispatcher, ProxyAgent } = require('undici');
+        setGlobalDispatcher(new ProxyAgent({
+            uri: process.env.E2E_PROXY_SERVER,
+            requestTls: { rejectUnauthorized: false },
+        }));
+    } catch (err) {
+        console.error('[Adoptapet Scraper] Failed to configure proxy dispatcher:', err.message);
+    }
+}
+
 const USER_AGENT = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 
 function extractFlightPayload(html) {

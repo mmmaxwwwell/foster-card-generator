@@ -2,6 +2,8 @@ name: Build and Release
 
 on:
   push:
+    branches:
+      - main
     tags:
       - 'v*.*.*'
 
@@ -20,6 +22,7 @@ jobs:
           cache: 'npm'
 
       - name: Set version from tag
+        if: startsWith(github.ref, 'refs/tags/v')
         run: npm version ${{ github.ref_name }} --no-git-tag-version --allow-same-version
 
       - name: Install dependencies
@@ -27,6 +30,13 @@ jobs:
 
       - name: Build Windows executable
         run: npm run build:win
+
+      - name: Smoke-test portable .exe
+        shell: bash
+        run: |
+          EXE=$(ls dist/*portable*.exe | head -n1)
+          echo "Smoke-testing: $EXE"
+          node test/smoke-artifact.js "$EXE"
 
       - name: Upload Windows artifacts
         uses: actions/upload-artifact@v4
@@ -37,8 +47,64 @@ jobs:
             dist/*.msi
           if-no-files-found: error
 
+  build-linux:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install smoke-test system deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb libfuse2
+
+      - name: Set version from tag
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: npm version ${{ github.ref_name }} --no-git-tag-version --allow-same-version
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build Linux AppImage and deb
+        run: npm run build:linux
+
+      - name: Smoke-test AppImage
+        run: |
+          APPIMAGE=$(ls dist/*.AppImage | head -n1)
+          chmod +x "$APPIMAGE"
+          echo "Smoke-testing: $APPIMAGE"
+          xvfb-run -a --server-args="-screen 0 1280x720x24" \
+            node test/smoke-artifact.js "$APPIMAGE" --no-sandbox
+
+      - name: Smoke-test .deb
+        run: |
+          DEB=$(ls dist/*.deb | head -n1)
+          echo "Installing: $DEB"
+          sudo apt-get install -y "./$DEB"
+          BIN=$(command -v foster-card-generator || echo "/opt/Foster Card Generator/foster-card-generator")
+          echo "Smoke-testing: $BIN"
+          xvfb-run -a --server-args="-screen 0 1280x720x24" \
+            node test/smoke-artifact.js "$BIN" --no-sandbox
+
+      - name: Upload Linux artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-build
+          path: |
+            dist/*.AppImage
+            dist/*.deb
+          if-no-files-found: error
+
   release:
-    needs: build-windows
+    needs: [build-windows, build-linux]
+    if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -50,12 +116,20 @@ jobs:
           name: windows-build
           path: dist
 
+      - name: Download Linux artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: linux-build
+          path: dist
+
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
           files: |
             dist/*.exe
             dist/*.msi
+            dist/*.AppImage
+            dist/*.deb
           generate_release_notes: true
           draft: false
           prerelease: ${{ contains(github.ref, '-') }}

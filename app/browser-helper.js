@@ -60,9 +60,21 @@ function findBrowserExecutable() {
 async function launchBrowser(options = {}) {
     const executablePath = findBrowserExecutable();
 
+    const args = ['--no-sandbox', '--disable-setuid-sandbox'];
+    // Test-harness opt-in: accept self-signed certs from the fixture proxy.
+    // Production paths never set this env var.
+    if (process.env.E2E_IGNORE_CERT_ERRORS === '1') {
+        args.push('--ignore-certificate-errors');
+    }
+    // Test-harness opt-in: route the puppeteer child chromium through the
+    // fixture proxy. Production paths never set this env var.
+    if (process.env.E2E_PROXY_SERVER) {
+        args.push(`--proxy-server=${process.env.E2E_PROXY_SERVER}`);
+    }
+
     const launchOptions = {
         headless: 'new',
-        args: ['--no-sandbox', '--disable-setuid-sandbox'],
+        args,
         ...options,
     };
 

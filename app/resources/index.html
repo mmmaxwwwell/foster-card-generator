@@ -4,30 +4,30 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Foster Animals</title>
-    <!-- Preact + HTM -->
-    <script src="https://unpkg.com/preact@10.19.3/dist/preact.umd.js"></script>
-    <script src="https://unpkg.com/preact@10.19.3/hooks/dist/hooks.umd.js"></script>
-    <script src="https://unpkg.com/htm@3.1.1/dist/htm.umd.js"></script>
+    <!-- Preact + HTM (vendored from node_modules by scripts/vendor-assets.js) -->
+    <script src="./vendor/preact/preact.umd.js"></script>
+    <script src="./vendor/preact/hooks.umd.js"></script>
+    <script src="./vendor/htm/htm.umd.js"></script>
     <script>
         // Make Preact hooks available globally
         window.preactHooks = preactHooks;
     </script>
-    <!-- CodeMirror 5 for syntax highlighting (UMD build compatible with Electron) -->
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.css">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/hint/show-hint.min.css">
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/xml/xml.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/javascript/javascript.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/css/css.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/htmlmixed/htmlmixed.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/hint/show-hint.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/edit/closebrackets.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/edit/closetag.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/fold/foldcode.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/fold/foldgutter.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/fold/brace-fold.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/fold/xml-fold.min.js"></script>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/fold/foldgutter.min.css">
+    <!-- CodeMirror 5 for syntax highlighting (vendored) -->
+    <link rel="stylesheet" href="./vendor/codemirror/codemirror.css">
+    <link rel="stylesheet" href="./vendor/codemirror/addon/hint/show-hint.css">
+    <script src="./vendor/codemirror/codemirror.js"></script>
+    <script src="./vendor/codemirror/mode/xml/xml.js"></script>
+    <script src="./vendor/codemirror/mode/javascript/javascript.js"></script>
+    <script src="./vendor/codemirror/mode/css/css.js"></script>
+    <script src="./vendor/codemirror/mode/htmlmixed/htmlmixed.js"></script>
+    <script src="./vendor/codemirror/addon/hint/show-hint.js"></script>
+    <script src="./vendor/codemirror/addon/edit/closebrackets.js"></script>
+    <script src="./vendor/codemirror/addon/edit/closetag.js"></script>
+    <script src="./vendor/codemirror/addon/fold/foldcode.js"></script>
+    <script src="./vendor/codemirror/addon/fold/foldgutter.js"></script>
+    <script src="./vendor/codemirror/addon/fold/brace-fold.js"></script>
+    <script src="./vendor/codemirror/addon/fold/xml-fold.js"></script>
+    <link rel="stylesheet" href="./vendor/codemirror/addon/fold/foldgutter.css">
     <script>
         // Handlebars variable completions for templates
         const handlebarsVariables = [

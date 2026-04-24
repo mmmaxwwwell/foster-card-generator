@@ -1,17 +1,68 @@
 # NixOS Installation Guide
 
-This app can be installed declaratively on NixOS using the provided flake.
+Foster Card Generator ships as a Nix flake, so NixOS (and non-NixOS Nix) users
+can install it straight from the remote repository without cloning.
 
-## Installation Methods
+## Quick start
 
-### Method 1: Using NixOS Module (Recommended for system-wide installation)
+```bash
+nix profile install github:mmmaxwwwell/foster-card-generator
+```
 
-Add the flake to your NixOS configuration:
+Or from the Forgejo mirror:
+
+```bash
+nix profile install git+https://forgejo.a110c8.net/max/foster-card-generator
+```
+
+That's it — `foster-card-generator` is now on your `PATH` and in your app
+launcher.
+
+### Pinning a version
+
+- Track the default branch (`main`): `github:mmmaxwwwell/foster-card-generator`
+- Pin to a release tag: `github:mmmaxwwwell/foster-card-generator/v3.0.3`
+- Pin to a commit: `github:mmmaxwwwell/foster-card-generator/<sha>`
+
+The same pin syntax works with the `git+https://...` form
+(`git+https://forgejo.a110c8.net/max/foster-card-generator?ref=v3.0.3`).
+
+## Prerequisites
+
+Flakes must be enabled. On NixOS, add this to your configuration:
 
 ```nix
 {
-  inputs.foster-card-generator.url = "path:/home/max/git/foster-card-generator";
-  # Or use git: inputs.foster-card-generator.url = "git+file:///home/max/git/foster-card-generator";
+  nix.settings.experimental-features = [ "nix-command" "flakes" ];
+}
+```
+
+On non-NixOS installs, put the same line in `~/.config/nix/nix.conf`:
+
+```
+experimental-features = nix-command flakes
+```
+
+If you can't or don't want to enable flakes, skip to
+[Method 2](#method-2-using-packagenix-no-flakes-required).
+
+## Not using Nix?
+
+Linux releases now include an AppImage. Download the latest
+`Foster-Card-Generator-*.AppImage` from the
+[Releases page](https://github.com/mmmaxwwwell/foster-card-generator/releases),
+`chmod +x` it, and run it. No Nix required.
+
+## Installation Methods
+
+### Method 1: NixOS Module (system-wide)
+
+Add the flake as an input and enable the module:
+
+```nix
+{
+  inputs.foster-card-generator.url = "github:mmmaxwwwell/foster-card-generator";
+  # or: inputs.foster-card-generator.url = "git+https://forgejo.a110c8.net/max/foster-card-generator";
 
   outputs = { self, nixpkgs, foster-card-generator, ... }: {
     nixosConfigurations.yourHostname = nixpkgs.lib.nixosSystem {
@@ -29,188 +80,154 @@ Add the flake to your NixOS configuration:
 }
 ```
 
-### Method 2: Using package.nix (Simple, no flake required)
+Pin to a tag by appending it to the URL:
+`github:mmmaxwwwell/foster-card-generator/v3.0.3`.
 
-Import the package directly in your NixOS configuration using `package.nix`:
+### Method 2: Direct Flake Package
 
-```nix
-{ lib, config, pkgs, ... }:
-
-let
-  foster-card-generator = import /path/to/foster-card-generator/package.nix { inherit pkgs; };
-in
-{
-  environment.systemPackages = [
-    foster-card-generator
-  ];
-}
-```
-
-This method:
-- Works without enabling flakes
-- Uses your system's `nixpkgs` version
-- Can be used in any NixOS module file (e.g., `configuration.nix` or a separate module)
-
-### Method 3: Direct Flake Package Installation
-
-Add to your `configuration.nix` or home-manager configuration:
+Inline the flake reference directly in `configuration.nix` or a home-manager
+config:
 
 ```nix
 {
   environment.systemPackages = [
-    (builtins.getFlake "path:/home/max/git/foster-card-generator").packages.${pkgs.system}.default
+    (builtins.getFlake "github:mmmaxwwwell/foster-card-generator").packages.${pkgs.system}.default
   ];
 }
 ```
 
-### Method 4: User Profile Installation
+### Method 3: User Profile Install
 
-Install to your user profile:
-
-```bash
-nix profile install .#foster-card-generator
-```
-
-### Method 5: Temporary Shell
-
-Try it out without installing:
+Install for the current user only:
 
 ```bash
-nix shell .#foster-card-generator
+nix profile install github:mmmaxwwwell/foster-card-generator
+# pin to a tag:
+nix profile install github:mmmaxwwwell/foster-card-generator/v3.0.3
 ```
 
-## Building
+Update later with `nix profile upgrade foster-card-generator`.
 
-To build the package locally:
+### Method 4: Temporary Shell (try before installing)
 
 ```bash
-nix build
+nix shell github:mmmaxwwwell/foster-card-generator
+foster-card-generator
 ```
 
-To run directly without building:
-
-```bash
-nix run
-```
+Leaves nothing installed — the shell exits, the package is garbage-collected on
+the next `nix-collect-garbage`.
 
 ## Usage
 
-After installation, Foster Card Generator will be available:
-
-### Desktop Application
-
-The app appears in your application launcher (dmenu, rofi, etc.) as "Foster Card Generator" with an icon. Simply launch it from your app menu or run:
+After installation, Foster Card Generator appears in your application launcher.
+From the terminal:
 
 ```bash
 foster-card-generator
 ```
 
-This starts the Neutralino desktop application for generating foster animal cards.
-
-### Command Line (Advanced)
-
-For CLI usage of the card generator, you can run:
+For scripted card generation:
 
 ```bash
 node /path/to/foster-card-generator/app/generate-card-cli.js '<json-params>'
 ```
 
-## Development
+---
 
-To enter a development shell with all dependencies:
+# Developers
+
+Everything below is for working *on* this repo, not installing it.
+
+## Building
+
+Clone, then:
 
 ```bash
-nix develop
+nix build          # build the package into ./result
+nix run            # run without installing
+nix develop        # enter a shell with all build dependencies
 ```
 
 ## Building for Windows
 
-The project can cross-compile Windows executables from Linux using Nix and electron-builder.
-
-### Prerequisites
-
-Enter the Nix development shell which includes wine and mono for cross-compilation:
+The Nix dev shell includes wine and mono so you can cross-compile Windows
+executables from Linux:
 
 ```bash
 nix develop
+npm ci
+npm run build:win            # NSIS + portable
+# or a single target:
+npm run build -- --win nsis
+npm run build -- --win portable
 ```
 
-### Build Windows Executables
+Output lands in `dist/`:
+- `Foster Card Generator Setup X.X.X.exe` — NSIS installer
+- `Foster Card Generator-X.X.X-portable.exe` — portable .exe
+
+## Building for Linux (AppImage)
 
 ```bash
-# Install dependencies
+nix develop
 npm ci
-
-# Build Windows targets (NSIS installer + portable executable)
-npm run build -- --win --x64
-
-# Or build specific target only:
-npm run build -- --win nsis       # NSIS installer (.exe)
-npm run build -- --win portable   # Portable executable (.exe)
+npm run build:linux
 ```
 
-The built files will be in the `dist/` directory:
-- `Foster Card Generator Setup X.X.X.exe` - NSIS installer
-- `Foster Card Generator-X.X.X-portable.exe` - Portable executable
+Output: `dist/Foster Card Generator-X.X.X.AppImage`.
 
-### Automated Releases
+## Automated Releases
 
-Windows builds are automatically created when you push a version tag:
+Pushing a version tag triggers GitHub Actions to build Windows (.exe) and Linux
+(.AppImage) artifacts and attach them to a GitHub Release:
 
 ```bash
 git tag v1.0.0
 git push origin v1.0.0
 ```
 
-This triggers GitHub Actions to build and publish Windows executables as release assets.
-
 ## Updating Dependencies
 
-If you need to update npm dependencies:
-
-1. Update `package.json` and regenerate `package-lock.json`:
+1. Update `package.json` and regenerate the lockfile:
    ```bash
-   npm install --lockfile-version=2 --legacy-peer-deps
+   npm install
    ```
 
-2. Regenerate node2nix files:
+2. Refresh the Nix npm deps hash in `flake.nix`:
    ```bash
-   nix-shell -p node2nix --run "node2nix -18 -i package.json"
+   ./scripts/update-npm-hash.sh
    ```
 
-3. Add PUPPETEER_SKIP_DOWNLOAD to node-packages.nix args (line ~7168):
-   ```nix
-   production = true;
-   bypassCache = true;
-   reconstructLock = true;
-   PUPPETEER_SKIP_DOWNLOAD = "1";
-   ```
-
-4. Commit the updated files:
+3. Commit:
    ```bash
-   git add package.json package-lock.json node-packages.nix node-env.nix default.nix
+   git add package.json package-lock.json flake.nix
    git commit -m "Update npm dependencies"
    ```
 
 ## Troubleshooting
 
-### Build fails with "getaddrinfo EAI_AGAIN"
+### Build fails with `getaddrinfo EAI_AGAIN`
 
-This means Puppeteer is trying to download Chrome during the build. Ensure `PUPPETEER_SKIP_DOWNLOAD = "1"` is set in `node-packages.nix` args section.
+Puppeteer is trying to download Chrome at build time. `PUPPETEER_SKIP_DOWNLOAD
+= "1"` is set in `flake.nix`; if you still see this, verify `npmFlags = [
+"--ignore-scripts" ]` hasn't been removed.
 
-### Missing dependencies
+### Build fails with `hash mismatch` for npm deps
 
-If you get module not found errors, regenerate the node2nix files following the "Updating Dependencies" section above.
+`package-lock.json` changed but `npmDepsHash` in `flake.nix` is stale. Run
+`./scripts/update-npm-hash.sh` to refresh it.
 
 ## How It Works
 
-This package uses:
-- **node2nix**: Generates Nix expressions from npm dependencies
-- **Puppeteer**: Uses system Chromium instead of downloading its own (set via `PUPPETEER_EXECUTABLE_PATH`)
-- **Node.js 22**: Specified via `--pkg-name nodejs_22` in node2nix
+- **buildNpmPackage** fetches every npm dep declared in `package-lock.json` and
+  verifies the full tree against `npmDepsHash` in `flake.nix`
+- **Puppeteer** uses system Chromium (via `PUPPETEER_EXECUTABLE_PATH`) instead
+  of downloading its own
+- **Node.js 22** is provided by `pkgs.nodejs_22` in the dev shell and build
 
-The flake provides:
-- `packages.default`: The foster-card-generator CLI tool
-- `apps.default`: Direct execution via `nix run`
-- `devShells.default`: Development environment with all dependencies
-- `nixosModules.default`: NixOS module for system-wide installation
+The flake exposes:
+- `packages.default` — the app
+- `apps.default` — direct execution via `nix run`
+- `devShells.default` — build dependencies for development
+- `nixosModules.default` — NixOS module for system-wide installation

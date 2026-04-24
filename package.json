@@ -2,7 +2,11 @@
   "name": "foster-card-generator",
   "version": "3.0.3",
   "main": "main.js",
-  "author": "Foster Card Generator",
+  "homepage": "https://github.com/mmmaxwwwell/foster-card-generator",
+  "author": {
+    "name": "mmmaxwwwell",
+    "email": "mmmaxwwwell@protonmail.com"
+  },
   "scripts": {
     "generate-cards": "mkdir -p output && node src/generate-cards.js",
     "db:migrate": "node db/migrate.js",
@@ -12,18 +16,27 @@
     "dev": "electron . --enable-logging",
     "build": "electron-builder",
     "build:win": "electron-builder --win --x64 --publish never",
-    "postinstall": "electron-builder install-app-deps",
+    "build:linux": "electron-builder --linux AppImage --x64 --publish never",
+    "vendor-assets": "node scripts/vendor-assets.js",
+    "prestart": "node scripts/vendor-assets.js",
+    "predev": "node scripts/vendor-assets.js",
+    "prebuild": "node scripts/vendor-assets.js",
+    "postinstall": "node scripts/vendor-assets.js && electron-builder install-app-deps",
     "test:scraper": "node test-scraper-integration.js",
     "test:scraper:local": "USE_LOCAL_FILE=true node test-scraper-integration.js",
-    "test:scrape-adoptapet": "node test/scrape-url-adoptapet.test.js"
+    "test:scrape-adoptapet": "node test/scrape-url-adoptapet.test.js",
+    "test:e2e": "node --test test/e2e/flows.spec.js"
   },
   "license": "MIT",
   "description": "Desktop app for creating printable foster animal business cards and flyers",
   "dependencies": {
     "axios": "^1.6.0",
     "cheerio": "^1.0.0",
+    "codemirror": "^5.65.16",
     "handlebars": "^4.7.8",
+    "htm": "^3.1.1",
     "js-yaml": "^4.1.0",
+    "preact": "^10.19.3",
     "puppeteer": "^24.1.1",
     "qrcode": "^1.5.4",
     "rimraf": "^6.0.1",
@@ -35,7 +48,9 @@
   "devDependencies": {
     "@types/node": "^22.13.0",
     "electron": "^33.0.0",
-    "electron-builder": "^25.0.0"
+    "electron-builder": "^25.0.0",
+    "playwright": "^1.59.1",
+    "selfsigned": "^5.5.0"
   },
   "build": {
     "appId": "com.foster-card-generator.app",
@@ -69,6 +84,24 @@
       ],
       "icon": "docs/images/icon.png",
       "signAndEditExecutable": false
+    },
+    "linux": {
+      "target": [
+        {
+          "target": "AppImage",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "deb",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "docs/images/icon.png",
+      "category": "Graphics"
     },
     "nsis": {
       "oneClick": false,
