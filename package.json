@@ -16,7 +16,7 @@
     "dev": "electron . --enable-logging",
     "build": "electron-builder",
     "build:win": "electron-builder --win --x64 --publish never",
-    "build:linux": "electron-builder --linux AppImage --x64 --publish never",
+    "build:linux": "electron-builder --linux --x64 --publish never",
     "vendor-assets": "node scripts/vendor-assets.js",
     "prestart": "node scripts/vendor-assets.js",
     "predev": "node scripts/vendor-assets.js",
