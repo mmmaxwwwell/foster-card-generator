@@ -30,7 +30,7 @@
           version = "1.0.0";
           src = ./.;
 
-          npmDepsHash = "sha256-2zmJq/ETrELcZFcynQZuRGr00IsgSpEicW8imPC7j5E=";
+          npmDepsHash = "sha256-MC2o1/AUXchofb53ww5YkKUlVXTTOyGdu8Ede0da+gc=";
 
           npmFlags = [ "--ignore-scripts" ];
           dontNpmBuild = true;
@@ -52,7 +52,7 @@
             # --ignore-scripts, so our postinstall hook does not run here).
             node scripts/vendor-assets.js
 
-            cp -r app src db package.json main.js $out/lib/foster-card-generator/
+            cp -r app package.json main.js $out/lib/foster-card-generator/
             cp -r node_modules $out/lib/foster-card-generator/
 
             # Electron's `require('electron')` intercept resolves via the
@@ -64,7 +64,7 @@
             throw new Error('electron npm shim: should be intercepted by Electron main process');
             JS
 
-            cp src/new_icon.png $out/share/icons/hicolor/256x256/apps/foster-card-generator.png
+            cp app/resources/icons/appIcon.png $out/share/icons/hicolor/256x256/apps/foster-card-generator.png
 
             makeWrapper ${pkgs.electron}/bin/electron $out/bin/foster-card-generator \
               --add-flags "$out/lib/foster-card-generator" \
